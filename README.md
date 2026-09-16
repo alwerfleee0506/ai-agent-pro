@@ -1,1 +1,3 @@
-# ai-agent-pro
+Flask
+gunicorn
+openai
