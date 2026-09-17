@@ -15,17 +15,29 @@ DATABASE_URL = os.environ.get("DATABASE_URL")
 
 SYSTEM_PROMPT = """
 أنت PRO AI Agent، مساعد ذكي شخصي للمستخدم محمود.
+
 تحدث مع محمود باللهجة الليبية بشكل طبيعي.
 كن ودوداً وواضحاً ومباشراً.
-تذكر سياق المحادثة الحالية.
-لا تخترع معلومات شخصية عن محمود.
-إذا لم تعرف معلومة شخصية عنه، قل إنك لا تعرفها.
+
+لديك نظام ذاكرة دائم.
+يمكنك استخدام المعلومات الموجودة في الذاكرة عند الحاجة.
+لا تخترع أي معلومة شخصية غير موجودة في الذاكرة.
+
+إذا أخبرك محمود بمعلومة شخصية مهمة أو تفضيل أو مشروع أو معلومة يريدك أن تتذكرها،
+يمكن حفظها في الذاكرة.
+
+إذا كانت المعلومة مؤقتة أو مرتبطة بالمحادثة الحالية فقط، لا تعتبرها ذاكرة دائمة.
+
+عند وجود معلومات في الذاكرة، استخدمها بشكل طبيعي بدون أن تقول في كل مرة
+"حسب ذاكرتي".
 """
 
 
 def get_db():
     if not DATABASE_URL:
-        raise RuntimeError("DATABASE_URL غير موجود في إعدادات Render")
+        raise RuntimeError(
+            "DATABASE_URL غير موجود في إعدادات Render"
+        )
 
     return psycopg2.connect(
         DATABASE_URL,
@@ -34,11 +46,14 @@ def get_db():
 
 
 def init_db():
+
     conn = get_db()
 
     try:
+
         cur = conn.cursor()
 
+        # المستخدمين
         cur.execute("""
             CREATE TABLE IF NOT EXISTS pro_users (
                 user_id TEXT PRIMARY KEY,
@@ -47,6 +62,7 @@ def init_db():
             )
         """)
 
+        # المحادثات
         cur.execute("""
             CREATE TABLE IF NOT EXISTS pro_messages (
                 id BIGSERIAL PRIMARY KEY,
@@ -59,6 +75,32 @@ def init_db():
             )
         """)
 
+        # الذاكرة
+        cur.execute("""
+            CREATE TABLE IF NOT EXISTS pro_memory (
+                id BIGSERIAL PRIMARY KEY,
+                user_id TEXT NOT NULL
+                    REFERENCES pro_users(user_id)
+                    ON DELETE CASCADE,
+
+                category TEXT NOT NULL,
+                memory_key TEXT NOT NULL,
+                memory_value TEXT NOT NULL,
+
+                importance INTEGER NOT NULL DEFAULT 5,
+
+                created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+                updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+
+                UNIQUE(user_id, category, memory_key)
+            )
+        """)
+
+        cur.execute("""
+            CREATE INDEX IF NOT EXISTS idx_pro_memory_user
+            ON pro_memory(user_id)
+        """)
+
         cur.execute("""
             CREATE INDEX IF NOT EXISTS idx_pro_messages_user_id_id
             ON pro_messages(user_id, id DESC)
@@ -67,7 +109,112 @@ def init_db():
         conn.commit()
 
     finally:
+
         conn.close()
+
+
+def save_memory(
+    user_id,
+    category,
+    memory_key,
+    memory_value,
+    importance=5
+):
+
+    conn = get_db()
+
+    try:
+
+        cur = conn.cursor()
+
+        cur.execute(
+            """
+            INSERT INTO pro_memory
+            (
+                user_id,
+                category,
+                memory_key,
+                memory_value,
+                importance
+            )
+            VALUES (%s, %s, %s, %s, %s)
+
+            ON CONFLICT (
+                user_id,
+                category,
+                memory_key
+            )
+
+            DO UPDATE SET
+                memory_value = EXCLUDED.memory_value,
+                importance = EXCLUDED.importance,
+                updated_at = NOW()
+            """,
+
+            (
+                user_id,
+                category,
+                memory_key,
+                memory_value,
+                importance
+            )
+        )
+
+        conn.commit()
+
+    finally:
+
+        conn.close()
+
+
+def get_memories(user_id):
+
+    conn = get_db()
+
+    try:
+
+        cur = conn.cursor(
+            cursor_factory=RealDictCursor
+        )
+
+        cur.execute(
+            """
+            SELECT
+                category,
+                memory_key,
+                memory_value,
+                importance
+            FROM pro_memory
+            WHERE user_id = %s
+            ORDER BY importance DESC, updated_at DESC
+            LIMIT 50
+            """,
+            (user_id,)
+        )
+
+        return cur.fetchall()
+
+    finally:
+
+        conn.close()
+
+
+def format_memories(memories):
+
+    if not memories:
+        return "لا توجد معلومات محفوظة في الذاكرة."
+
+    text = ""
+
+    for memory in memories:
+
+        text += (
+            f"- [{memory['category']}] "
+            f"{memory['memory_key']}: "
+            f"{memory['memory_value']}\n"
+        )
+
+    return text
 
 
 HTML = """
@@ -277,12 +424,21 @@ def chat():
 
     data = request.get_json(silent=True) or {}
 
-    message = data.get("message", "").strip()
+    message = data.get(
+        "message",
+        ""
+    ).strip()
 
-    user_id = data.get("user_id", "").strip()
+    user_id = data.get(
+        "user_id",
+        ""
+    ).strip()
 
     if not user_id:
-        user_id = str(uuid.uuid4())
+
+        user_id = str(
+            uuid.uuid4()
+        )
 
     if not message:
 
@@ -300,15 +456,19 @@ def chat():
             cursor_factory=RealDictCursor
         )
 
+        # إنشاء المستخدم
         cur.execute(
             """
             INSERT INTO pro_users (user_id)
             VALUES (%s)
-            ON CONFLICT (user_id) DO NOTHING
+
+            ON CONFLICT (user_id)
+            DO NOTHING
             """,
             (user_id,)
         )
 
+        # حفظ رسالة المستخدم
         cur.execute(
             """
             INSERT INTO pro_messages
@@ -324,6 +484,7 @@ def chat():
 
         conn.commit()
 
+        # آخر 20 رسالة
         cur.execute(
             """
             SELECT role, message
@@ -341,6 +502,16 @@ def chat():
 
         conn.close()
 
+        # جلب الذاكرة
+        memories = get_memories(
+            user_id
+        )
+
+        memory_text = format_memories(
+            memories
+        )
+
+        # بناء المحادثة
         conversation = ""
 
         for item in rows:
@@ -359,12 +530,18 @@ def chat():
 
         prompt = (
             SYSTEM_PROMPT
-            + "\n\nاسم المستخدم: محمود"
-            + "\n\nالمحادثة السابقة:\n"
+
+            + "\n\n===== الذاكرة الدائمة =====\n"
+            + memory_text
+
+            + "\n\n===== المحادثة الحالية =====\n"
             + conversation
-            + "\n\nأجب على آخر رسالة مباشرة باللهجة الليبية."
+
+            + "\n\nأجب على آخر رسالة مباشرة "
+              "باللهجة الليبية."
         )
 
+        # Gemini
         interaction = client.interactions.create(
             model="gemini-3.6-flash",
             input=prompt
@@ -372,6 +549,7 @@ def chat():
 
         reply = interaction.output_text
 
+        # حفظ رد PRO
         conn = get_db()
 
         cur = conn.cursor()
@@ -392,6 +570,16 @@ def chat():
         conn.commit()
 
         conn.close()
+
+        # ذاكرة بسيطة مضمونة:
+        # اسم المستخدم محمود
+        save_memory(
+            user_id=user_id,
+            category="personal",
+            memory_key="name",
+            memory_value="محمود",
+            importance=10
+        )
 
         return jsonify({
             "reply": reply,
