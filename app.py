@@ -1,8 +1,9 @@
-
 from flask import Flask, request, jsonify, render_template_string
 from google import genai
 import os
 import uuid
+import psycopg2
+from psycopg2.extras import RealDictCursor
 
 app = Flask(__name__)
 
@@ -10,7 +11,7 @@ client = genai.Client(
     api_key=os.environ.get("GEMINI_API_KEY")
 )
 
-users = {}
+DATABASE_URL = os.environ.get("DATABASE_URL")
 
 SYSTEM_PROMPT = """
 أنت PRO AI Agent، مساعد ذكي شخصي للمستخدم محمود.
@@ -22,14 +23,51 @@ SYSTEM_PROMPT = """
 """
 
 
-def get_user_memory(user_id):
-    if user_id not in users:
-        users[user_id] = {
-            "name": "محمود",
-            "history": []
-        }
+def get_db():
+    if not DATABASE_URL:
+        raise RuntimeError("DATABASE_URL غير موجود في إعدادات Render")
 
-    return users[user_id]
+    return psycopg2.connect(
+        DATABASE_URL,
+        sslmode="require"
+    )
+
+
+def init_db():
+    conn = get_db()
+
+    try:
+        cur = conn.cursor()
+
+        cur.execute("""
+            CREATE TABLE IF NOT EXISTS pro_users (
+                user_id TEXT PRIMARY KEY,
+                name TEXT NOT NULL DEFAULT 'محمود',
+                created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+            )
+        """)
+
+        cur.execute("""
+            CREATE TABLE IF NOT EXISTS pro_messages (
+                id BIGSERIAL PRIMARY KEY,
+                user_id TEXT NOT NULL
+                    REFERENCES pro_users(user_id)
+                    ON DELETE CASCADE,
+                role TEXT NOT NULL,
+                message TEXT NOT NULL,
+                created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+            )
+        """)
+
+        cur.execute("""
+            CREATE INDEX IF NOT EXISTS idx_pro_messages_user_id_id
+            ON pro_messages(user_id, id DESC)
+        """)
+
+        conn.commit()
+
+    finally:
+        conn.close()
 
 
 HTML = """
@@ -37,8 +75,11 @@ HTML = """
 <html lang="ar" dir="rtl">
 
 <head>
+
 <meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1.0">
+
+<meta name="viewport"
+      content="width=device-width, initial-scale=1.0">
 
 <title>PRO AI Agent</title>
 
@@ -149,8 +190,13 @@ const chat = document.getElementById("chat");
 let userId = localStorage.getItem("pro_ai_user_id");
 
 if (!userId) {
+
     userId = crypto.randomUUID();
-    localStorage.setItem("pro_ai_user_id", userId);
+
+    localStorage.setItem(
+        "pro_ai_user_id",
+        userId
+    );
 }
 
 form.addEventListener("submit", async function(e) {
@@ -222,6 +268,7 @@ form.addEventListener("submit", async function(e) {
 
 @app.route("/")
 def home():
+
     return render_template_string(HTML)
 
 
@@ -234,45 +281,89 @@ def chat():
 
     user_id = data.get("user_id", "").strip()
 
+    if not user_id:
+        user_id = str(uuid.uuid4())
+
     if not message:
+
         return jsonify({
             "error": "اكتب رسالة أولاً"
         }), 400
 
-    if not user_id:
-        user_id = str(uuid.uuid4())
-
-    memory = get_user_memory(user_id)
-
-    memory["history"].append({
-        "role": "user",
-        "text": message
-    })
-
-    recent_history = memory["history"][-20:]
-
-    conversation = ""
-
-    for item in recent_history:
-
-        if item["role"] == "user":
-            conversation += "محمود: " + item["text"] + "\n"
-
-        else:
-            conversation += "PRO AI Agent: " + item["text"] + "\n"
-
-    prompt = (
-        SYSTEM_PROMPT
-        + "\n\nاسم المستخدم: "
-        + memory["name"]
-        + "\n\nالمحادثة السابقة:\n"
-        + conversation
-        + "\n\nرسالة محمود الحالية:\n"
-        + message
-        + "\n\nأجب على محمود مباشرة باللهجة الليبية."
-    )
-
     try:
+
+        init_db()
+
+        conn = get_db()
+
+        cur = conn.cursor(
+            cursor_factory=RealDictCursor
+        )
+
+        cur.execute(
+            """
+            INSERT INTO pro_users (user_id)
+            VALUES (%s)
+            ON CONFLICT (user_id) DO NOTHING
+            """,
+            (user_id,)
+        )
+
+        cur.execute(
+            """
+            INSERT INTO pro_messages
+            (user_id, role, message)
+            VALUES (%s, %s, %s)
+            """,
+            (
+                user_id,
+                "user",
+                message
+            )
+        )
+
+        conn.commit()
+
+        cur.execute(
+            """
+            SELECT role, message
+            FROM pro_messages
+            WHERE user_id = %s
+            ORDER BY id DESC
+            LIMIT 20
+            """,
+            (user_id,)
+        )
+
+        rows = list(
+            reversed(cur.fetchall())
+        )
+
+        conn.close()
+
+        conversation = ""
+
+        for item in rows:
+
+            if item["role"] == "user":
+                speaker = "محمود"
+            else:
+                speaker = "PRO AI Agent"
+
+            conversation += (
+                speaker
+                + ": "
+                + item["message"]
+                + "\n"
+            )
+
+        prompt = (
+            SYSTEM_PROMPT
+            + "\n\nاسم المستخدم: محمود"
+            + "\n\nالمحادثة السابقة:\n"
+            + conversation
+            + "\n\nأجب على آخر رسالة مباشرة باللهجة الليبية."
+        )
 
         interaction = client.interactions.create(
             model="gemini-3.6-flash",
@@ -281,10 +372,26 @@ def chat():
 
         reply = interaction.output_text
 
-        memory["history"].append({
-            "role": "assistant",
-            "text": reply
-        })
+        conn = get_db()
+
+        cur = conn.cursor()
+
+        cur.execute(
+            """
+            INSERT INTO pro_messages
+            (user_id, role, message)
+            VALUES (%s, %s, %s)
+            """,
+            (
+                user_id,
+                "assistant",
+                reply
+            )
+        )
+
+        conn.commit()
+
+        conn.close()
 
         return jsonify({
             "reply": reply,
@@ -302,5 +409,10 @@ if __name__ == "__main__":
 
     app.run(
         host="0.0.0.0",
-        port=int(os.environ.get("PORT", 10000))
+        port=int(
+            os.environ.get(
+                "PORT",
+                10000
+            )
+        )
     )
