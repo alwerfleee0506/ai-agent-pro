@@ -1,11 +1,11 @@
 from flask import Flask, request, jsonify, render_template_string
-from openai import OpenAI
+from google import genai
 import os
 
 app = Flask(__name__)
 
-client = OpenAI(
-    api_key=os.environ.get("OPENAI_API_KEY")
+client = genai.Client(
+    api_key=os.environ.get("GEMINI_API_KEY")
 )
 
 HTML = """
@@ -64,7 +64,6 @@ button {
     padding: 14px 20px;
     border: none;
     border-radius: 10px;
-    cursor: pointer;
 }
 </style>
 </head>
@@ -101,7 +100,6 @@ form.addEventListener("submit", async (e) => {
     loading.className = "message ai";
     loading.textContent = "جاري التفكير...";
     chat.appendChild(loading);
-    chat.scrollTop = chat.scrollHeight;
 
     try {
         const response = await fetch("/chat", {
@@ -109,9 +107,7 @@ form.addEventListener("submit", async (e) => {
             headers: {
                 "Content-Type": "application/json"
             },
-            body: JSON.stringify({
-                message: message
-            })
+            body: JSON.stringify({message: message})
         });
 
         const data = await response.json();
@@ -144,22 +140,13 @@ def chat():
         return jsonify({"error": "اكتب رسالة أولاً"}), 400
 
     try:
-        response = client.responses.create(
-            model="gpt-5-mini",
-            input=[
-                {
-                    "role": "system",
-                    "content": "أنت PRO AI Agent، مساعد ذكي مفيد وواضح."
-                },
-                {
-                    "role": "user",
-                    "content": message
-                }
-            ]
+        response = client.models.generate_content(
+            model="gemini-2.5-flash",
+            contents=message
         )
 
         return jsonify({
-            "reply": response.output_text
+            "reply": response.text
         })
 
     except Exception as e:
