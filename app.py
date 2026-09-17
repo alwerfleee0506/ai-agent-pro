@@ -9,33 +9,20 @@ client = genai.Client(
 api_key=os.environ.get("GEMINI_API_KEY")
 )
 
-==========================================
-
-PRO AI AGENT — BASIC MEMORY
-
-==========================================
-
-ذاكرة مؤقتة للمستخدمين.
-
-لاحقاً بننقلوها إلى PostgreSQL باش تبقى محفوظة.
-
 users = {}
 
 SYSTEM_PROMPT = """
 أنت PRO AI Agent، مساعد ذكي شخصي.
 
-المستخدم الأساسي الذي تتعامل معه هو محمود.
+المستخدم الأساسي هو محمود.
 
-قواعدك:
+القواعد:
 
-- تحدث معه باللهجة الليبية بشكل طبيعي.
-- خليك ودود، واضح ومباشر.
-- إذا كان السؤال تقني، أعطِ خطوات عملية وواضحة.
+- تحدث مع محمود باللهجة الليبية بشكل طبيعي.
+- كن واضحاً وودوداً ومباشراً.
 - تذكر سياق المحادثة الحالية.
-- تعامل مع محمود كمستخدم معروف لديك.
-- لا تدّعي أنك تتذكر معلومة إذا لم تكن موجودة في الذاكرة.
-- لا تخترع معلومات شخصية عن محمود.
-- إذا أعطاك محمود معلومة وطلب منك حفظها، اعتبرها معلومة قابلة للحفظ لاحقاً في الذاكرة الدائمة.
+- لا تخترع معلومات شخصية عنه.
+- إذا أعطاك محمود معلومة وطلب حفظها، تعامل معها كمعلومة قابلة للحفظ لاحقاً في الذاكرة الدائمة.
   """
 
 def get_user_memory(user_id):
@@ -47,19 +34,13 @@ users[user_id] = {
 
 return users[user_id]
 
-==========================================
-
-HTML INTERFACE
-
-==========================================
-
 HTML = """
 
-<!DOCTYPE html><html lang="ar" dir="rtl"><head><meta charset="UTF-8"><meta name="viewport"
-content="width=device-width, initial-scale=1.0">
-
+<!DOCTYPE html><html lang="ar" dir="rtl">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>PRO AI Agent</title><style>
-
 body {
     font-family: Arial, sans-serif;
     background: #111;
@@ -119,43 +100,33 @@ button {
     border: none;
     border-radius: 10px;
 }
-
-</style></head><body><div class="container"><h1>🤖 PRO AI Agent</h1><div id="chat"><div class="message ai">
+</style></head><body><div class="container"><h1>🤖 PRO AI Agent</h1><div id="chat">
+<div class="message ai">
 السلام عليكم محمود 👋
 أنا PRO AI Agent.
 شن نقدر نساعدك فيه اليوم؟
-</div></div><form id="form"><input
+</div>
+</div><form id="form"><input
 id="message"
 placeholder="اكتب رسالتك..."
 autocomplete="off"
 
 «»
 
-<button type="submit">
-إرسال
-</button></form></div><script>
+<button type="submit">إرسال</button>
+
+</form></div><script>
 
 const form = document.getElementById("form");
-
 const input = document.getElementById("message");
-
 const chat = document.getElementById("chat");
 
-
-// إنشاء معرف ثابت لهذا المتصفح
 let userId = localStorage.getItem("pro_ai_user_id");
 
 if (!userId) {
-
     userId = crypto.randomUUID();
-
-    localStorage.setItem(
-        "pro_ai_user_id",
-        userId
-    );
-
+    localStorage.setItem("pro_ai_user_id", userId);
 }
-
 
 form.addEventListener("submit", async (e) => {
 
@@ -165,60 +136,39 @@ form.addEventListener("submit", async (e) => {
 
     if (!message) return;
 
-
     chat.innerHTML +=
         `<div class="message user">${message}</div>`;
 
-
     input.value = "";
 
-
-    const loading =
-        document.createElement("div");
+    const loading = document.createElement("div");
 
     loading.className = "message ai";
-
-    loading.textContent =
-        "جاري التفكير...";
-
+    loading.textContent = "جاري التفكير...";
 
     chat.appendChild(loading);
 
-
     try {
 
-        const response = await fetch(
-            "/chat",
-            {
+        const response = await fetch("/chat", {
 
-                method: "POST",
+            method: "POST",
 
-                headers: {
-                    "Content-Type":
-                    "application/json"
-                },
+            headers: {
+                "Content-Type": "application/json"
+            },
 
-                body: JSON.stringify({
+            body: JSON.stringify({
+                message: message,
+                user_id: userId
+            })
 
-                    message: message,
+        });
 
-                    user_id: userId
-
-                })
-
-            }
-        );
-
-
-        const data =
-            await response.json();
-
+        const data = await response.json();
 
         loading.textContent =
-            data.reply ||
-            data.error ||
-            "صار خطأ.";
-
+            data.reply || data.error || "صار خطأ.";
 
     } catch (error) {
 
@@ -227,98 +177,51 @@ form.addEventListener("submit", async (e) => {
 
     }
 
-
-    chat.scrollTop =
-        chat.scrollHeight;
+    chat.scrollTop = chat.scrollHeight;
 
 });
 
-</script></body></html>
-"""==========================================
-
-HOME
-
-==========================================
-
-@app.route("/")
+</script></body>
+</html>
+"""@app.route("/")
 def home():
-
 return render_template_string(HTML)
-
-==========================================
-
-CHAT
-
-==========================================
 
 @app.route("/chat", methods=["POST"])
 def chat():
 
-data =
-    request.get_json(silent=True) or {}
+data = request.get_json(silent=True) or {}
 
+message = data.get("message", "").strip()
 
-message =
-    data.get("message", "").strip()
-
-
-user_id =
-    data.get("user_id", "").strip()
-
+user_id = data.get("user_id", "").strip()
 
 if not message:
-
     return jsonify({
         "error": "اكتب رسالة أولاً"
     }), 400
 
-
 if not user_id:
+    user_id = str(uuid.uuid4())
 
-    user_id =
-        str(uuid.uuid4())
+memory = get_user_memory(user_id)
 
-
-memory =
-    get_user_memory(user_id)
-
-
-# إضافة رسالة المستخدم للذاكرة
 memory["history"].append({
-
     "role": "user",
-
     "text": message
-
 })
 
-
-# نحافظ على آخر 20 رسالة فقط
-recent_history =
-    memory["history"][-20:]
-
+recent_history = memory["history"][-20:]
 
 conversation = ""
-
 
 for item in recent_history:
 
     if item["role"] == "user":
-
-        conversation += (
-            "محمود: "
-            + item["text"]
-            + "\n"
-        )
+        conversation += "محمود: " + item["text"] + "\n"
 
     else:
-
-        conversation += (
-            "PRO AI Agent: "
-            + item["text"]
-            + "\n"
-        )
-
+        conversation += "PRO AI Agent: " + item["text"] + "\n"
 
 prompt = f"""
 
@@ -330,7 +233,7 @@ prompt = f"""
 سجل المحادثة الأخيرة:
 {conversation}
 
-الرسالة الجديدة من محمود:
+الرسالة الجديدة:
 {message}
 
 أجب على محمود مباشرة.
@@ -338,64 +241,32 @@ prompt = f"""
 
 try:
 
-    interaction =
-        client.interactions.create(
+    interaction = client.interactions.create(
+        model="gemini-3.6-flash",
+        input=prompt
+    )
 
-            model="gemini-3.6-flash",
+    reply = interaction.output_text
 
-            input=prompt
-
-        )
-
-
-    reply =
-        interaction.output_text
-
-
-    # حفظ رد الوكيل
     memory["history"].append({
-
         "role": "assistant",
-
         "text": reply
-
     })
-
 
     return jsonify({
-
         "reply": reply,
-
         "user_id": user_id
-
     })
-
 
 except Exception as e:
 
     return jsonify({
-
         "error": str(e)
-
     }), 500
-
-==========================================
-
-START
-
-==========================================
 
 if name == "main":
 
 app.run(
-
     host="0.0.0.0",
-
-    port=int(
-        os.environ.get(
-            "PORT",
-            10000
-        )
-    )
-
+    port=int(os.environ.get("PORT", 10000))
 )
