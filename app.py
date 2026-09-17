@@ -15,80 +15,34 @@ client = genai.Client(
 
 DATABASE_URL = os.environ.get("DATABASE_URL")
 
-
-# =========================================================
-# SYSTEM PROMPT
-# =========================================================
-
 SYSTEM_PROMPT = """
 أنت PRO AI Agent، مساعد ذكي شخصي للمستخدم محمود.
 
 تحدث مع محمود باللهجة الليبية بشكل طبيعي.
 كن ودوداً وواضحاً ومباشراً.
 
-لديك ذاكرة دائمة للمستخدم.
+لديك ذاكرة دائمة.
 
-مهمتك:
-1. الإجابة على رسالة محمود بشكل طبيعي.
-2. اكتشاف المعلومات المهمة التي تستحق الحفظ في الذاكرة.
-3. تحديث المعلومات القديمة إذا أعطاك محمود معلومة جديدة.
-4. إذا طلب محمود نسيان معلومة، أرسلها في قائمة forget.
-
-لا تحفظ كل شيء تقوله محمود.
-احفظ فقط المعلومات طويلة المدى، مثل:
-- الاسم والمعلومات الشخصية العامة.
+احفظ فقط المعلومات طويلة المدى والمفيدة مستقبلاً، مثل:
+- المعلومات الشخصية العامة.
 - التفضيلات المستمرة.
-- المشاريع التي يعمل عليها.
-- معلومات مهمة يريد استخدامها مستقبلاً.
-- إعدادات أو اختيارات يكرر استخدامها.
+- المشاريع.
+- المعلومات المهمة التي يريد محمود تذكرها.
 
 لا تحفظ تلقائياً:
 - الأسئلة العابرة.
 - المعلومات المؤقتة.
 - كلمات المرور.
 - مفاتيح API.
-- أرقام البطاقات أو الحسابات.
-- المعلومات المالية الحساسة.
+- أرقام البطاقات والحسابات.
 - الموقع الدقيق.
 - المعلومات الصحية الحساسة.
-إلا إذا طلب محمود صراحةً حفظها.
 
-إذا قال محمود مثلاً:
-"تذكر أني نحب الردود المختصرة"
-فهذه ذاكرة تستحق الحفظ.
+إذا طلب محمود حفظ معلومة، احفظها.
 
-إذا قال:
-"انسَ أني قلت كذا"
-ضع المعلومة المناسبة في forget.
+إذا طلب محمود نسيان معلومة، ضعها في forget.
 
-إذا كانت المعلومة موجودة مسبقاً ولكن تغيرت،
-استخدم نفس category و memory_key مع القيمة الجديدة.
-
-مهم جداً:
-يجب أن يكون ردك النهائي JSON فقط.
-لا تستخدم Markdown.
-لا تستخدم ```json.
-لا تضف أي كلام خارج JSON.
-
-الصيغة المطلوبة:
-
-{
-  "reply": "الرد الذي سيظهر لمحمود",
-  "memories": [
-    {
-      "category": "personal",
-      "memory_key": "name",
-      "memory_value": "محمود",
-      "importance": 10
-    }
-  ],
-  "forget": [
-    {
-      "category": "preferences",
-      "memory_key": "example"
-    }
-  ]
-}
+إذا تغيرت معلومة موجودة، حدّثها.
 
 الفئات المسموحة:
 personal
@@ -96,22 +50,38 @@ preferences
 projects
 important
 
-importance رقم من 1 إلى 10.
+يجب أن يكون ردك JSON فقط بهذا الشكل:
 
-إذا لم توجد ذاكرة جديدة:
+{
+  "reply": "الرد لمحمود",
+  "memories": [
+    {
+      "category": "preferences",
+      "memory_key": "مثال",
+      "memory_value": "مثال",
+      "importance": 8
+    }
+  ],
+  "forget": []
+}
+
+إذا لا توجد ذاكرة جديدة:
 "memories": []
 
-إذا لم توجد معلومة يجب نسيانها:
+إذا لا توجد معلومة للنسيان:
 "forget": []
 
-لا تخترع أي ذاكرة.
-لا تستنتج معلومات شخصية غير مذكورة أو مؤكدة.
+لا تخترع معلومات شخصية.
 """
 
 
-# =========================================================
-# DATABASE
-# =========================================================
+ALLOWED_CATEGORIES = {
+    "personal",
+    "preferences",
+    "projects",
+    "important"
+}
+
 
 def get_db():
 
@@ -134,7 +104,6 @@ def init_db():
 
         cur = conn.cursor()
 
-        # المستخدمين
         cur.execute("""
             CREATE TABLE IF NOT EXISTS pro_users (
                 user_id TEXT PRIMARY KEY,
@@ -143,7 +112,6 @@ def init_db():
             )
         """)
 
-        # المحادثات
         cur.execute("""
             CREATE TABLE IF NOT EXISTS pro_messages (
                 id BIGSERIAL PRIMARY KEY,
@@ -156,23 +124,18 @@ def init_db():
             )
         """)
 
-        # الذاكرة
         cur.execute("""
             CREATE TABLE IF NOT EXISTS pro_memory (
                 id BIGSERIAL PRIMARY KEY,
                 user_id TEXT NOT NULL
                     REFERENCES pro_users(user_id)
                     ON DELETE CASCADE,
-
                 category TEXT NOT NULL,
                 memory_key TEXT NOT NULL,
                 memory_value TEXT NOT NULL,
-
                 importance INTEGER NOT NULL DEFAULT 5,
-
                 created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
                 updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-
                 UNIQUE(user_id, category, memory_key)
             )
         """)
@@ -190,20 +153,7 @@ def init_db():
         conn.commit()
 
     finally:
-
         conn.close()
-
-
-# =========================================================
-# MEMORY FUNCTIONS
-# =========================================================
-
-ALLOWED_CATEGORIES = {
-    "personal",
-    "preferences",
-    "projects",
-    "important"
-}
 
 
 def save_memory(
@@ -222,7 +172,7 @@ def save_memory(
 
     try:
         importance = int(importance)
-    except:
+    except Exception:
         importance = 5
 
     importance = max(1, min(10, importance))
@@ -256,7 +206,6 @@ def save_memory(
                 importance = EXCLUDED.importance,
                 updated_at = NOW()
             """,
-
             (
                 user_id,
                 category,
@@ -269,7 +218,6 @@ def save_memory(
         conn.commit()
 
     finally:
-
         conn.close()
 
 
@@ -278,9 +226,6 @@ def delete_memory(
     category,
     memory_key
 ):
-
-    if not category or not memory_key:
-        return
 
     conn = get_db()
 
@@ -305,7 +250,6 @@ def delete_memory(
         conn.commit()
 
     finally:
-
         conn.close()
 
 
@@ -326,6 +270,7 @@ def get_memories(user_id):
                 memory_key,
                 memory_value,
                 importance
+
             FROM pro_memory
 
             WHERE user_id = %s
@@ -342,49 +287,51 @@ def get_memories(user_id):
         return cur.fetchall()
 
     finally:
-
         conn.close()
 
 
 def format_memories(memories):
 
     if not memories:
-        return "لا توجد معلومات محفوظة في الذاكرة."
+        return "لا توجد معلومات محفوظة."
 
-    text = ""
+    result = []
 
     for memory in memories:
 
-        text += (
-            f"- [{memory['category']}] "
-            f"{memory['memory_key']}: "
-            f"{memory['memory_value']}\n"
+        result.append(
+            "- [{}] {}: {}".format(
+                memory["category"],
+                memory["memory_key"],
+                memory["memory_value"]
+            )
         )
 
-    return text
+    return "\n".join(result)
 
-
-# =========================================================
-# SAFE JSON PARSER
-# =========================================================
 
 def parse_ai_response(text):
 
     if not text:
         return {
-            "reply": "صار خطأ في رد الوكيل.",
+            "reply": "ما قدرتش نطلع رد.",
             "memories": [],
             "forget": []
         }
 
     cleaned = text.strip()
 
-    # إزالة Markdown fences لو Gemini حطها
     cleaned = re.sub(
-        r"^```(?:json)?\s*",
+        r"^```json\s*",
         "",
         cleaned,
         flags=re.IGNORECASE
+    )
+
+    cleaned = re.sub(
+        r"^```\s*",
+        "",
+        cleaned
     )
 
     cleaned = re.sub(
@@ -399,14 +346,12 @@ def parse_ai_response(text):
 
     except Exception:
 
-        # محاولة استخراج أول JSON object
         start = cleaned.find("{")
         end = cleaned.rfind("}")
 
-        if start != -1 and end != -1 and end > start:
+        if start != -1 and end > start:
 
             try:
-
                 data = json.loads(
                     cleaned[start:end + 1]
                 )
@@ -435,23 +380,13 @@ def parse_ai_response(text):
             "forget": []
         }
 
-    reply = data.get(
-        "reply",
-        ""
-    )
+    reply = data.get("reply", "")
 
     if not isinstance(reply, str):
         reply = str(reply)
 
-    memories = data.get(
-        "memories",
-        []
-    )
-
-    forget = data.get(
-        "forget",
-        []
-    )
+    memories = data.get("memories", [])
+    forget = data.get("forget", [])
 
     if not isinstance(memories, list):
         memories = []
@@ -466,11 +401,7 @@ def parse_ai_response(text):
     }
 
 
-# =========================================================
-# HTML
-# =========================================================
-
-HTML = """
+HTML = r"""
 <!DOCTYPE html>
 <html lang="ar" dir="rtl">
 
@@ -479,7 +410,7 @@ HTML = """
 <meta charset="UTF-8">
 
 <meta name="viewport"
-      content="width=device-width, initial-scale=1.0">
+content="width=device-width, initial-scale=1.0">
 
 <title>PRO AI Agent</title>
 
@@ -599,39 +530,369 @@ if (!userId) {
     );
 }
 
-form.addEventListener("submit", async function(e) {
+form.addEventListener(
+    "submit",
+    async function(e) {
 
-    e.preventDefault();
+        e.preventDefault();
 
-    const message = input.value.trim();
+        const message = input.value.trim();
 
-    if (!message) {
-        return;
+        if (!message) {
+            return;
+        }
+
+        chat.innerHTML +=
+            '<div class="message user">' +
+            message +
+            '</div>';
+
+        input.value = "";
+
+        const loading =
+            document.createElement("div");
+
+        loading.className = "message ai";
+        loading.textContent = "جاري التفكير...";
+
+        chat.appendChild(loading);
+
+        try {
+
+            const response =
+                await fetch("/chat", {
+
+                    method: "POST",
+
+                    headers: {
+                        "Content-Type":
+                            "application/json"
+                    },
+
+                    body: JSON.stringify({
+                        message: message,
+                        user_id: userId
+                    })
+
+                });
+
+            const data =
+                await response.json();
+
+            loading.textContent =
+                data.reply ||
+                data.error ||
+                "صار خطأ.";
+
+        } catch (error) {
+
+            loading.textContent =
+                "تعذر الاتصال بالوكيل.";
+
+        }
+
+        chat.scrollTop =
+            chat.scrollHeight;
+
     }
+);
 
-    chat.innerHTML +=
-        '<div class="message user">' +
-        message +
-        '</div>';
+</script>
 
-    input.value = "";
+</body>
 
-    const loading = document.createElement("div");
+</html>
+"""
 
-    loading.className = "message ai";
-    loading.textContent = "جاري التفكير...";
 
-    chat.appendChild(loading);
+@app.route("/")
+def home():
 
-    try {
+    return render_template_string(HTML)
 
-        const response = await fetch("/chat", {
 
-            method: "POST",
+@app.route(
+    "/chat",
+    methods=["POST"]
+)
+def chat():
 
-            headers: {
-                "Content-Type": "application/json"
-            },
+    data = request.get_json(
+        silent=True
+    ) or {}
 
-            body: JSON.stringify({
-                message:
+    message = data.get(
+        "message",
+        ""
+    ).strip()
+
+    user_id = data.get(
+        "user_id",
+        ""
+    ).strip()
+
+    if not user_id:
+
+        user_id = str(
+            uuid.uuid4()
+        )
+
+    if not message:
+
+        return jsonify({
+            "error": "اكتب رسالة أولاً"
+        }), 400
+
+    try:
+
+        init_db()
+
+        conn = get_db()
+
+        cur = conn.cursor(
+            cursor_factory=RealDictCursor
+        )
+
+        cur.execute(
+            """
+            INSERT INTO pro_users (user_id)
+            VALUES (%s)
+
+            ON CONFLICT (user_id)
+            DO NOTHING
+            """,
+            (user_id,)
+        )
+
+        cur.execute(
+            """
+            INSERT INTO pro_messages
+            (
+                user_id,
+                role,
+                message
+            )
+            VALUES (%s, %s, %s)
+            """,
+            (
+                user_id,
+                "user",
+                message
+            )
+        )
+
+        conn.commit()
+
+        cur.execute(
+            """
+            SELECT
+                role,
+                message
+
+            FROM pro_messages
+
+            WHERE user_id = %s
+
+            ORDER BY id DESC
+
+            LIMIT 20
+            """,
+            (user_id,)
+        )
+
+        rows = list(
+            reversed(
+                cur.fetchall()
+            )
+        )
+
+        conn.close()
+
+        memories = get_memories(
+            user_id
+        )
+
+        memory_text = format_memories(
+            memories
+        )
+
+        conversation = ""
+
+        for item in rows:
+
+            if item["role"] == "user":
+                speaker = "محمود"
+            else:
+                speaker = "PRO AI Agent"
+
+            conversation += (
+                speaker
+                + ": "
+                + item["message"]
+                + "\n"
+            )
+
+        prompt = (
+            SYSTEM_PROMPT
+            + "\n\n===== الذاكرة =====\n"
+            + memory_text
+            + "\n\n===== المحادثة =====\n"
+            + conversation
+            + "\n\nأجب على آخر رسالة."
+        )
+
+        interaction = client.interactions.create(
+            model="gemini-3.6-flash",
+            input=prompt
+        )
+
+        raw_output = interaction.output_text
+
+        result = parse_ai_response(
+            raw_output
+        )
+
+        reply = result["reply"]
+
+        if not reply:
+            reply = "تمام يا محمود."
+
+        # حفظ الذكريات الجديدة
+        for memory in result["memories"]:
+
+            if not isinstance(
+                memory,
+                dict
+            ):
+                continue
+
+            category = str(
+                memory.get(
+                    "category",
+                    ""
+                )
+            ).strip().lower()
+
+            memory_key = str(
+                memory.get(
+                    "memory_key",
+                    ""
+                )
+            ).strip()
+
+            memory_value = str(
+                memory.get(
+                    "memory_value",
+                    ""
+                )
+            ).strip()
+
+            importance = memory.get(
+                "importance",
+                5
+            )
+
+            if category not in ALLOWED_CATEGORIES:
+                continue
+
+            save_memory(
+                user_id,
+                category,
+                memory_key,
+                memory_value,
+                importance
+            )
+
+        # نسيان الذكريات
+        for memory in result["forget"]:
+
+            if not isinstance(
+                memory,
+                dict
+            ):
+                continue
+
+            category = str(
+                memory.get(
+                    "category",
+                    ""
+                )
+            ).strip().lower()
+
+            memory_key = str(
+                memory.get(
+                    "memory_key",
+                    ""
+                )
+            ).strip()
+
+            if category not in ALLOWED_CATEGORIES:
+                continue
+
+            if not memory_key:
+                continue
+
+            delete_memory(
+                user_id,
+                category,
+                memory_key
+            )
+
+        # حفظ رد PRO
+        conn = get_db()
+
+        cur = conn.cursor()
+
+        cur.execute(
+            """
+            INSERT INTO pro_messages
+            (
+                user_id,
+                role,
+                message
+            )
+            VALUES (%s, %s, %s)
+            """,
+            (
+                user_id,
+                "assistant",
+                reply
+            )
+        )
+
+        conn.commit()
+
+        conn.close()
+
+        # ضمان حفظ اسم محمود
+        save_memory(
+            user_id,
+            "personal",
+            "name",
+            "محمود",
+            10
+        )
+
+        return jsonify({
+            "reply": reply,
+            "user_id": user_id
+        })
+
+    except Exception as e:
+
+        return jsonify({
+            "error": str(e)
+        }), 500
+
+
+if __name__ == "__main__":
+
+    app.run(
+        host="0.0.0.0",
+        port=int(
+            os.environ.get(
+                "PORT",
+                10000
+            )
+        )
+    )
