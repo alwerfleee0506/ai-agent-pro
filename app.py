@@ -1,39 +1,49 @@
+
 from flask import Flask, request, jsonify, render_template_string
 from google import genai
 import os
 import uuid
 
-app = Flask(name)
+app = Flask(__name__)
 
 client = genai.Client(
-api_key=os.environ.get("GEMINI_API_KEY")
+    api_key=os.environ.get("GEMINI_API_KEY")
 )
 
 users = {}
 
 SYSTEM_PROMPT = """
 أنت PRO AI Agent، مساعد ذكي شخصي للمستخدم محمود.
-تحدث معه باللهجة الليبية بشكل طبيعي.
+تحدث مع محمود باللهجة الليبية بشكل طبيعي.
 كن ودوداً وواضحاً ومباشراً.
-تذكر سياق المحادثة.
+تذكر سياق المحادثة الحالية.
 لا تخترع معلومات شخصية عن محمود.
+إذا لم تعرف معلومة شخصية عنه، قل إنك لا تعرفها.
 """
 
+
 def get_user_memory(user_id):
-if user_id not in users:
-users[user_id] = {
-"name": "محمود",
-"history": []
-}
-return users[user_id]
+    if user_id not in users:
+        users[user_id] = {
+            "name": "محمود",
+            "history": []
+        }
+
+    return users[user_id]
+
 
 HTML = """
+<!DOCTYPE html>
+<html lang="ar" dir="rtl">
 
-<!DOCTYPE html><html lang="ar" dir="rtl">
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>PRO AI Agent</title><style>
+
+<title>PRO AI Agent</title>
+
+<style>
+
 body {
     font-family: Arial, sans-serif;
     background: #111;
@@ -93,22 +103,44 @@ button {
     border: none;
     border-radius: 10px;
 }
-</style></head><body><div class="container"><h1>🤖 PRO AI Agent</h1><div id="chat">
+
+</style>
+
+</head>
+
+<body>
+
+<div class="container">
+
+<h1>🤖 PRO AI Agent</h1>
+
+<div id="chat">
+
 <div class="message ai">
 السلام عليكم محمود 👋
 أنا PRO AI Agent.
 شن نقدر نساعدك فيه اليوم؟
 </div>
-</div><form id="form"><input
+
+</div>
+
+<form id="form">
+
+<input
 id="message"
 placeholder="اكتب رسالتك..."
 autocomplete="off"
+>
 
-«»
+<button type="submit">
+إرسال
+</button>
 
-<button type="submit">إرسال</button>
+</form>
 
-</form></div><script>
+</div>
+
+<script>
 
 const form = document.getElementById("form");
 const input = document.getElementById("message");
@@ -148,14 +180,18 @@ form.addEventListener("submit", async function(e) {
     try {
 
         const response = await fetch("/chat", {
+
             method: "POST",
+
             headers: {
                 "Content-Type": "application/json"
             },
+
             body: JSON.stringify({
                 message: message,
                 user_id: userId
             })
+
         });
 
         const data = await response.json();
@@ -176,86 +212,95 @@ form.addEventListener("submit", async function(e) {
 
 });
 
-</script></body>
+</script>
+
+</body>
+
 </html>
-"""@app.route("/")
+"""
+
+
+@app.route("/")
 def home():
-return render_template_string(HTML)
+    return render_template_string(HTML)
+
 
 @app.route("/chat", methods=["POST"])
 def chat():
 
-data = request.get_json(silent=True) or {}
+    data = request.get_json(silent=True) or {}
 
-message = data.get("message", "").strip()
+    message = data.get("message", "").strip()
 
-user_id = data.get("user_id", "").strip()
+    user_id = data.get("user_id", "").strip()
 
-if not message:
-    return jsonify({
-        "error": "اكتب رسالة أولاً"
-    }), 400
+    if not message:
+        return jsonify({
+            "error": "اكتب رسالة أولاً"
+        }), 400
 
-if not user_id:
-    user_id = str(uuid.uuid4())
+    if not user_id:
+        user_id = str(uuid.uuid4())
 
-memory = get_user_memory(user_id)
-
-memory["history"].append({
-    "role": "user",
-    "text": message
-})
-
-recent_history = memory["history"][-20:]
-
-conversation = ""
-
-for item in recent_history:
-
-    if item["role"] == "user":
-        conversation += "محمود: " + item["text"] + "\n"
-    else:
-        conversation += "PRO AI Agent: " + item["text"] + "\n"
-
-prompt = (
-    SYSTEM_PROMPT
-    + "\n\nاسم المستخدم: "
-    + memory["name"]
-    + "\n\nالمحادثة السابقة:\n"
-    + conversation
-    + "\n\nرسالة محمود الحالية:\n"
-    + message
-    + "\n\nأجب على محمود مباشرة باللهجة الليبية."
-)
-
-try:
-
-    interaction = client.interactions.create(
-        model="gemini-3.6-flash",
-        input=prompt
-    )
-
-    reply = interaction.output_text
+    memory = get_user_memory(user_id)
 
     memory["history"].append({
-        "role": "assistant",
-        "text": reply
+        "role": "user",
+        "text": message
     })
 
-    return jsonify({
-        "reply": reply,
-        "user_id": user_id
-    })
+    recent_history = memory["history"][-20:]
 
-except Exception as e:
+    conversation = ""
 
-    return jsonify({
-        "error": str(e)
-    }), 500
+    for item in recent_history:
 
-if name == "main":
+        if item["role"] == "user":
+            conversation += "محمود: " + item["text"] + "\n"
 
-app.run(
-    host="0.0.0.0",
-    port=int(os.environ.get("PORT", 10000))
-)
+        else:
+            conversation += "PRO AI Agent: " + item["text"] + "\n"
+
+    prompt = (
+        SYSTEM_PROMPT
+        + "\n\nاسم المستخدم: "
+        + memory["name"]
+        + "\n\nالمحادثة السابقة:\n"
+        + conversation
+        + "\n\nرسالة محمود الحالية:\n"
+        + message
+        + "\n\nأجب على محمود مباشرة باللهجة الليبية."
+    )
+
+    try:
+
+        interaction = client.interactions.create(
+            model="gemini-3.6-flash",
+            input=prompt
+        )
+
+        reply = interaction.output_text
+
+        memory["history"].append({
+            "role": "assistant",
+            "text": reply
+        })
+
+        return jsonify({
+            "reply": reply,
+            "user_id": user_id
+        })
+
+    except Exception as e:
+
+        return jsonify({
+            "error": str(e)
+        }), 500
+
+
+if __name__ == "__main__":
+
+    app.run(
+        host="0.0.0.0",
+        port=int(os.environ.get("PORT", 10000))
+    )
