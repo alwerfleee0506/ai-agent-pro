@@ -16,7 +16,6 @@ client = genai.Client(
 DATABASE_URL = os.environ.get("DATABASE_URL")
 
 SYSTEM_PROMPT = """
-أنتSYSTEM_PROMPT = """
 أنت PRO AI Agent، وكيل ذكاء اصطناعي شخصي لمحمود.
 
 هويتك:
