@@ -6,14 +6,41 @@ import json
 import re
 import psycopg2
 from psycopg2.extras import RealDictCursor
+import time
+import traceback
 
 app = Flask(__name__)
 
+# =========================================================
+# Gemini
+# =========================================================
+
+GEMINI_API_KEY = os.environ.get("GEMINI_API_KEY")
+
+if not GEMINI_API_KEY:
+    print("[STARTUP] WARNING: GEMINI_API_KEY غير موجود")
+
 client = genai.Client(
-    api_key=os.environ.get("GEMINI_API_KEY")
+    api_key=GEMINI_API_KEY
 )
 
+# =========================================================
+# Database
+# =========================================================
+
 DATABASE_URL = os.environ.get("DATABASE_URL")
+
+ALLOWED_CATEGORIES = {
+    "personal",
+    "preferences",
+    "projects",
+    "important"
+}
+
+
+# =========================================================
+# System Prompt
+# =========================================================
 
 SYSTEM_PROMPT = """
 أنت PRO AI Agent، وكيل ذكاء اصطناعي شخصي لمحمود.
@@ -133,13 +160,9 @@ important
 """
 
 
-ALLOWED_CATEGORIES = {
-    "personal",
-    "preferences",
-    "projects",
-    "important"
-}
-
+# =========================================================
+# Database connection
+# =========================================================
 
 def get_db():
 
@@ -150,11 +173,18 @@ def get_db():
 
     return psycopg2.connect(
         DATABASE_URL,
-        sslmode="require"
+        sslmode="require",
+        connect_timeout=10
     )
 
 
+# =========================================================
+# Initialize database
+# =========================================================
+
 def init_db():
+
+    print("[DB] بدء تهيئة قاعدة البيانات")
 
     conn = get_db()
 
@@ -210,9 +240,15 @@ def init_db():
 
         conn.commit()
 
+        print("[DB] تهيئة قاعدة البيانات تمت بنجاح")
+
     finally:
         conn.close()
 
+
+# =========================================================
+# Memory functions
+# =========================================================
 
 def save_memory(
     user_id,
@@ -368,9 +404,14 @@ def format_memories(memories):
     return "\n".join(result)
 
 
+# =========================================================
+# AI response parser
+# =========================================================
+
 def parse_ai_response(text):
 
     if not text:
+
         return {
             "reply": "ما قدرتش نطلع رد.",
             "memories": [],
@@ -410,6 +451,7 @@ def parse_ai_response(text):
         if start != -1 and end > start:
 
             try:
+
                 data = json.loads(
                     cleaned[start:end + 1]
                 )
@@ -459,6 +501,10 @@ def parse_ai_response(text):
     }
 
 
+# =========================================================
+# HTML
+# =========================================================
+
 HTML = r"""
 <!DOCTYPE html>
 <html lang="ar" dir="rtl">
@@ -505,6 +551,7 @@ h1 {
     margin: 8px 0;
     border-radius: 10px;
     white-space: pre-wrap;
+    word-wrap: break-word;
 }
 
 .user {
@@ -532,6 +579,10 @@ button {
     padding: 14px 20px;
     border: none;
     border-radius: 10px;
+}
+
+button:disabled {
+    opacity: 0.5;
 }
 
 </style>
@@ -562,7 +613,10 @@ placeholder="اكتب رسالتك..."
 autocomplete="off"
 >
 
-<button type="submit">
+<button
+id="sendButton"
+type="submit"
+>
 إرسال
 </button>
 
@@ -572,15 +626,27 @@ autocomplete="off"
 
 <script>
 
-const form = document.getElementById("form");
-const input = document.getElementById("message");
-const chat = document.getElementById("chat");
+const form =
+    document.getElementById("form");
 
-let userId = localStorage.getItem("pro_ai_user_id");
+const input =
+    document.getElementById("message");
+
+const chat =
+    document.getElementById("chat");
+
+const sendButton =
+    document.getElementById("sendButton");
+
+
+let userId =
+    localStorage.getItem("pro_ai_user_id");
+
 
 if (!userId) {
 
-    userId = crypto.randomUUID();
+    userId =
+        crypto.randomUUID();
 
     localStorage.setItem(
         "pro_ai_user_id",
@@ -588,21 +654,35 @@ if (!userId) {
     );
 }
 
+
+let requestRunning = false;
+
+
 form.addEventListener(
     "submit",
     async function(e) {
 
         e.preventDefault();
 
-        const message = input.value.trim();
+        if (requestRunning) {
+            return;
+        }
+
+        const message =
+            input.value.trim();
 
         if (!message) {
             return;
         }
 
+        requestRunning = true;
+
+        sendButton.disabled = true;
+        input.disabled = true;
+
         chat.innerHTML +=
             '<div class="message user">' +
-            message +
+            escapeHtml(message) +
             '</div>';
 
         input.value = "";
@@ -610,50 +690,153 @@ form.addEventListener(
         const loading =
             document.createElement("div");
 
-        loading.className = "message ai";
-        loading.textContent = "جاري التفكير...";
+        loading.className =
+            "message ai";
 
-        chat.appendChild(loading);
+        loading.textContent =
+            "جاري التفكير...";
+
+        chat.appendChild(
+            loading
+        );
+
+        chat.scrollTop =
+            chat.scrollHeight;
+
+
+        const controller =
+            new AbortController();
+
+        const timeout =
+            setTimeout(
+                function() {
+                    controller.abort();
+                },
+                60000
+            );
+
 
         try {
 
             const response =
-                await fetch("/chat", {
+                await fetch(
+                    "/chat",
+                    {
+                        method: "POST",
 
-                    method: "POST",
+                        headers: {
+                            "Content-Type":
+                                "application/json"
+                        },
 
-                    headers: {
-                        "Content-Type":
-                            "application/json"
-                    },
+                        body: JSON.stringify({
+                            message:
+                                message,
 
-                    body: JSON.stringify({
-                        message: message,
-                        user_id: userId
-                    })
+                            user_id:
+                                userId
+                        }),
 
-                });
+                        signal:
+                            controller.signal
+                    }
+                );
 
-            const data =
-                await response.json();
 
-            loading.textContent =
-                data.reply ||
-                data.error ||
-                "صار خطأ.";
+            clearTimeout(timeout);
+
+
+            const text =
+                await response.text();
+
+
+            let data;
+
+            try {
+
+                data =
+                    JSON.parse(text);
+
+            } catch (jsonError) {
+
+                console.error(
+                    "Invalid JSON:",
+                    text
+                );
+
+                throw new Error(
+                    "الخادم رجع استجابة غير صالحة"
+                );
+            }
+
+
+            if (!response.ok) {
+
+                loading.textContent =
+                    data.error ||
+                    "حدث خطأ في الخادم.";
+
+            } else {
+
+                loading.textContent =
+                    data.reply ||
+                    data.error ||
+                    "صار خطأ.";
+
+            }
+
 
         } catch (error) {
 
-            loading.textContent =
-                "تعذر الاتصال بالوكيل.";
+            clearTimeout(timeout);
+
+            console.error(
+                "CHAT ERROR:",
+                error
+            );
+
+
+            if (
+                error.name ===
+                "AbortError"
+            ) {
+
+                loading.textContent =
+                    "الطلب أخذ وقت طويل. جرب مرة ثانية.";
+
+            } else {
+
+                loading.textContent =
+                    "تعذر الاتصال بالوكيل.";
+
+            }
 
         }
+
+
+        requestRunning = false;
+
+        sendButton.disabled = false;
+        input.disabled = false;
+
+        input.focus();
 
         chat.scrollTop =
             chat.scrollHeight;
 
     }
 );
+
+
+function escapeHtml(text) {
+
+    const div =
+        document.createElement("div");
+
+    div.textContent = text;
+
+    return div.innerHTML;
+}
 
 </script>
 
@@ -663,10 +846,28 @@ form.addEventListener(
 """
 
 
+# =========================================================
+# Routes
+# =========================================================
+
 @app.route("/")
 def home():
 
-    return render_template_string(HTML)
+    return render_template_string(
+        HTML
+    )
+
+
+@app.route(
+    "/health",
+    methods=["GET"]
+)
+def health():
+
+    return jsonify({
+        "status": "ok",
+        "service": "PRO AI Agent"
+    })
 
 
 @app.route(
@@ -675,41 +876,79 @@ def home():
 )
 def chat():
 
-    data = request.get_json(
-        silent=True
-    ) or {}
+    request_start = time.time()
 
-    message = data.get(
-        "message",
-        ""
-    ).strip()
-
-    user_id = data.get(
-        "user_id",
-        ""
-    ).strip()
-
-    if not user_id:
-
-        user_id = str(
-            uuid.uuid4()
-        )
-
-    if not message:
-
-        return jsonify({
-            "error": "اكتب رسالة أولاً"
-        }), 400
+    print("")
+    print("====================================")
+    print("[CHAT] START")
 
     try:
 
-        init_db()
+        # -------------------------------------------------
+        # Read request
+        # -------------------------------------------------
+
+        data = request.get_json(
+            silent=True
+        ) or {}
+
+        message = data.get(
+            "message",
+            ""
+        ).strip()
+
+        user_id = data.get(
+            "user_id",
+            ""
+        ).strip()
+
+        if not user_id:
+
+            user_id = str(
+                uuid.uuid4()
+            )
+
+        if not message:
+
+            print(
+                "[CHAT] ERROR: empty message"
+            )
+
+            return jsonify({
+                "error":
+                    "اكتب رسالة أولاً"
+            }), 400
+
+
+        print(
+            "[CHAT] user_id:",
+            user_id
+        )
+
+        print(
+            "[CHAT] message:",
+            message[:100]
+        )
+
+
+        # -------------------------------------------------
+        # Database - user + message
+        # -------------------------------------------------
+
+        print(
+            "[DB] Connecting..."
+        )
 
         conn = get_db()
+
+        print(
+            "[DB] Connected"
+        )
 
         cur = conn.cursor(
             cursor_factory=RealDictCursor
         )
+
 
         cur.execute(
             """
@@ -721,6 +960,7 @@ def chat():
             """,
             (user_id,)
         )
+
 
         cur.execute(
             """
@@ -739,7 +979,17 @@ def chat():
             )
         )
 
+
         conn.commit()
+
+        print(
+            "[DB] User message saved"
+        )
+
+
+        # -------------------------------------------------
+        # Conversation history
+        # -------------------------------------------------
 
         cur.execute(
             """
@@ -758,21 +1008,51 @@ def chat():
             (user_id,)
         )
 
+
         rows = list(
             reversed(
                 cur.fetchall()
             )
         )
 
+
         conn.close()
 
-        memories = get_memories(
-            user_id
+        print(
+            "[DB] Conversation loaded:",
+            len(rows),
+            "messages"
         )
 
-        memory_text = format_memories(
-            memories
+
+        # -------------------------------------------------
+        # Memories
+        # -------------------------------------------------
+
+        print(
+            "[MEMORY] Loading..."
         )
+
+        memories =
+            get_memories(
+                user_id
+            )
+
+        memory_text =
+            format_memories(
+                memories
+            )
+
+        print(
+            "[MEMORY] Loaded:",
+            len(memories),
+            "memories"
+        )
+
+
+        # -------------------------------------------------
+        # Build conversation
+        # -------------------------------------------------
 
         conversation = ""
 
@@ -790,6 +1070,7 @@ def chat():
                 + "\n"
             )
 
+
         prompt = (
             SYSTEM_PROMPT
             + "\n\n===== الذاكرة =====\n"
@@ -799,23 +1080,85 @@ def chat():
             + "\n\nأجب على آخر رسالة."
         )
 
-        interaction = client.interactions.create(
-            model="gemini-3.6-flash",
-            input=prompt
+
+        # -------------------------------------------------
+        # Gemini
+        # -------------------------------------------------
+
+        print(
+            "[GEMINI] Calling Gemini..."
         )
 
-        raw_output = interaction.output_text
+        gemini_start =
+            time.time()
 
-        result = parse_ai_response(
-            raw_output
+
+        interaction =
+            client.interactions.create(
+                model="gemini-3.6-flash",
+                input=prompt,
+                timeout=45
+            )
+
+
+        gemini_time =
+            time.time() -
+            gemini_start
+
+
+        print(
+            "[GEMINI] Response received in",
+            round(gemini_time, 2),
+            "seconds"
         )
 
-        reply = result["reply"]
+
+        raw_output =
+            interaction.output_text
+
+
+        if not raw_output:
+
+            raise RuntimeError(
+                "Gemini رجع استجابة بدون نص"
+            )
+
+
+        print(
+            "[GEMINI] Output length:",
+            len(raw_output)
+        )
+
+
+        # -------------------------------------------------
+        # Parse AI response
+        # -------------------------------------------------
+
+        result =
+            parse_ai_response(
+                raw_output
+            )
+
+
+        reply =
+            result["reply"]
+
 
         if not reply:
-            reply = "تمام يا محمود."
 
-        # حفظ الذكريات الجديدة
+            reply =
+                "تمام يا محمود."
+
+
+        # -------------------------------------------------
+        # Save memories
+        # -------------------------------------------------
+
+        print(
+            "[MEMORY] Processing new memories..."
+        )
+
+
         for memory in result["memories"]:
 
             if not isinstance(
@@ -824,34 +1167,44 @@ def chat():
             ):
                 continue
 
-            category = str(
-                memory.get(
-                    "category",
-                    ""
-                )
-            ).strip().lower()
 
-            memory_key = str(
-                memory.get(
-                    "memory_key",
-                    ""
-                )
-            ).strip()
+            category =
+                str(
+                    memory.get(
+                        "category",
+                        ""
+                    )
+                ).strip().lower()
 
-            memory_value = str(
-                memory.get(
-                    "memory_value",
-                    ""
-                )
-            ).strip()
 
-            importance = memory.get(
-                "importance",
-                5
-            )
+            memory_key =
+                str(
+                    memory.get(
+                        "memory_key",
+                        ""
+                    )
+                ).strip()
+
+
+            memory_value =
+                str(
+                    memory.get(
+                        "memory_value",
+                        ""
+                    )
+                ).strip()
+
+
+            importance =
+                memory.get(
+                    "importance",
+                    5
+                )
+
 
             if category not in ALLOWED_CATEGORIES:
                 continue
+
 
             save_memory(
                 user_id,
@@ -861,7 +1214,16 @@ def chat():
                 importance
             )
 
-        # نسيان الذكريات
+
+        print(
+            "[MEMORY] New memories processed"
+        )
+
+
+        # -------------------------------------------------
+        # Forget memories
+        # -------------------------------------------------
+
         for memory in result["forget"]:
 
             if not isinstance(
@@ -870,25 +1232,32 @@ def chat():
             ):
                 continue
 
-            category = str(
-                memory.get(
-                    "category",
-                    ""
-                )
-            ).strip().lower()
 
-            memory_key = str(
-                memory.get(
-                    "memory_key",
-                    ""
-                )
-            ).strip()
+            category =
+                str(
+                    memory.get(
+                        "category",
+                        ""
+                    )
+                ).strip().lower()
+
+
+            memory_key =
+                str(
+                    memory.get(
+                        "memory_key",
+                        ""
+                    )
+                ).strip()
+
 
             if category not in ALLOWED_CATEGORIES:
                 continue
 
+
             if not memory_key:
                 continue
+
 
             delete_memory(
                 user_id,
@@ -896,10 +1265,20 @@ def chat():
                 memory_key
             )
 
-        # حفظ رد PRO
+
+        # -------------------------------------------------
+        # Save assistant reply
+        # -------------------------------------------------
+
+        print(
+            "[DB] Saving assistant reply..."
+        )
+
+
         conn = get_db()
 
         cur = conn.cursor()
+
 
         cur.execute(
             """
@@ -918,11 +1297,16 @@ def chat():
             )
         )
 
+
         conn.commit()
 
         conn.close()
 
-        # ضمان حفظ اسم محمود
+
+        # -------------------------------------------------
+        # Guarantee name memory
+        # -------------------------------------------------
+
         save_memory(
             user_id,
             "personal",
@@ -931,26 +1315,106 @@ def chat():
             10
         )
 
+
+        total_time =
+            time.time() -
+            request_start
+
+
+        print(
+            "[CHAT] DONE in",
+            round(total_time, 2),
+            "seconds"
+        )
+
+        print(
+            "===================================="
+        )
+
+
         return jsonify({
             "reply": reply,
             "user_id": user_id
         })
 
+
     except Exception as e:
 
+        elapsed =
+            time.time() -
+            request_start
+
+
+        print("")
+        print(
+            "[CHAT] ERROR after",
+            round(elapsed, 2),
+            "seconds"
+        )
+
+        print(
+            "[CHAT] ERROR TYPE:",
+            type(e).__name__
+        )
+
+        print(
+            "[CHAT] ERROR:",
+            str(e)
+        )
+
+        traceback.print_exc()
+
+        print(
+            "===================================="
+        )
+
+
         return jsonify({
-            "error": str(e)
+            "error":
+                "صار خطأ داخل الوكيل: "
+                + str(e)
         }), 500
 
 
+# =========================================================
+# Startup
+# =========================================================
+
 if __name__ == "__main__":
 
-    app.run(
-        host="0.0.0.0",
-        port=int(
+    print("")
+    print("====================================")
+    print("PRO AI Agent starting...")
+    print("====================================")
+
+
+    try:
+
+        init_db()
+
+    except Exception as e:
+
+        print(
+            "[STARTUP] Database initialization failed:"
+        )
+
+        print(
+            str(e)
+        )
+
+        traceback.print_exc()
+
+
+    port =
+        int(
             os.environ.get(
                 "PORT",
                 10000
             )
         )
+
+
+    app.run(
+        host="0.0.0.0",
+        port=port
     )
