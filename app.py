@@ -1,5 +1,6 @@
 from flask import Flask, request, jsonify, render_template_string
 from google import genai
+from google.genai import types
 import os
 import json
 import re
@@ -35,8 +36,17 @@ ALLOWED_CATEGORIES = {
 if not GEMINI_API_KEY:
     print("[STARTUP] WARNING: GEMINI_API_KEY غير موجود")
 
+# مهم:
+# محاولة واحدة فقط بدون Retry طويل
+# والـ HTTP timeout = 30 ثانية
 client = genai.Client(
-    api_key=GEMINI_API_KEY
+    api_key=GEMINI_API_KEY,
+    http_options=types.HttpOptions(
+        timeout=30000,
+        retry_options=types.HttpRetryOptions(
+            attempts=1
+        )
+    )
 )
 
 # =========================================================
@@ -288,14 +298,6 @@ def migrate_old_users():
     """
     يوحد كل بيانات المستخدمين القديمة التي تم إنشاؤها
     بواسطة المتصفحات المختلفة تحت هوية PRO_OWNER_ID.
-
-    يتم:
-    1. إنشاء المستخدم الموحد.
-    2. نقل الذكريات القديمة.
-    3. نقل المحادثات القديمة.
-    4. حذف المستخدمين القدامى.
-
-    العملية كلها داخل Transaction واحدة.
     """
 
     print("[MIGRATION] Checking old user IDs...")
@@ -306,10 +308,6 @@ def migrate_old_users():
         cur = conn.cursor(
             cursor_factory=RealDictCursor
         )
-
-        # -------------------------------------------------
-        # تأكد من وجود المستخدم الموحد
-        # -------------------------------------------------
 
         cur.execute(
             """
@@ -327,10 +325,6 @@ def migrate_old_users():
                 "محمود"
             )
         )
-
-        # -------------------------------------------------
-        # الحصول على المستخدمين القدامى
-        # -------------------------------------------------
 
         cur.execute(
             """
@@ -362,18 +356,6 @@ def migrate_old_users():
             "[MIGRATION] Old users found:",
             len(old_ids)
         )
-
-        # -------------------------------------------------
-        # نقل الذكريات
-        # -------------------------------------------------
-        #
-        # نرتب حسب updated_at DESC
-        # حتى أحدث قيمة لنفس memory_key
-        # يتم اعتمادها أولاً.
-        #
-        # ON CONFLICT DO NOTHING
-        # يمنع استبدال القيمة الأحدث بقيمة أقدم.
-        # -------------------------------------------------
 
         cur.execute(
             """
@@ -443,10 +425,6 @@ def migrate_old_users():
             migrated_memories
         )
 
-        # -------------------------------------------------
-        # نقل المحادثات
-        # -------------------------------------------------
-
         cur.execute(
             """
             SELECT
@@ -497,13 +475,6 @@ def migrate_old_users():
             migrated_messages
         )
 
-        # -------------------------------------------------
-        # حذف المستخدمين القدامى
-        #
-        # ON DELETE CASCADE
-        # يحذف أي بيانات قديمة بقيت.
-        # -------------------------------------------------
-
         cur.execute(
             """
             DELETE FROM pro_users
@@ -526,6 +497,7 @@ def migrate_old_users():
         )
 
     except Exception:
+
         conn.rollback()
 
         print(
@@ -541,11 +513,13 @@ def migrate_old_users():
 
 
 def init_db():
+
     print("[DB] بدء تهيئة قاعدة البيانات")
 
     conn = get_db()
 
     try:
+
         cur = conn.cursor()
 
         cur.execute("""
@@ -599,12 +573,8 @@ def init_db():
         print("[DB] تهيئة قاعدة البيانات تمت بنجاح")
 
     finally:
-        conn.close()
 
-    # -----------------------------------------------------
-    # بعد إنشاء الجداول:
-    # وحد كل بيانات الاختبارات القديمة
-    # -----------------------------------------------------
+        conn.close()
 
     migrate_old_users()
 
@@ -620,6 +590,7 @@ def save_memory(
     memory_value,
     importance=5
 ):
+
     if category not in ALLOWED_CATEGORIES:
         return
 
@@ -636,6 +607,7 @@ def save_memory(
     conn = get_db()
 
     try:
+
         cur = conn.cursor()
 
         cur.execute(
@@ -673,6 +645,7 @@ def save_memory(
         conn.commit()
 
     finally:
+
         conn.close()
 
 
@@ -681,9 +654,11 @@ def delete_memory(
     category,
     memory_key
 ):
+
     conn = get_db()
 
     try:
+
         cur = conn.cursor()
 
         cur.execute(
@@ -703,13 +678,16 @@ def delete_memory(
         conn.commit()
 
     finally:
+
         conn.close()
 
 
 def get_memories(user_id):
+
     conn = get_db()
 
     try:
+
         cur = conn.cursor(
             cursor_factory=RealDictCursor
         )
@@ -734,16 +712,19 @@ def get_memories(user_id):
         return cur.fetchall()
 
     finally:
+
         conn.close()
 
 
 def format_memories(memories):
+
     if not memories:
         return "لا توجد معلومات محفوظة."
 
     result = []
 
     for memory in memories:
+
         result.append(
             "- [{}] {}: {}".format(
                 memory["category"],
@@ -760,7 +741,9 @@ def format_memories(memories):
 # =========================================================
 
 def parse_ai_response(text):
+
     if not text:
+
         return {
             "reply": "ما قدرتش نطلع رد.",
             "memories": [],
@@ -789,24 +772,32 @@ def parse_ai_response(text):
     )
 
     try:
+
         data = json.loads(cleaned)
 
     except Exception:
+
         start = cleaned.find("{")
         end = cleaned.rfind("}")
 
         if start != -1 and end > start:
+
             try:
+
                 data = json.loads(
                     cleaned[start:end + 1]
                 )
+
             except Exception:
+
                 return {
                     "reply": text,
                     "memories": [],
                     "forget": []
                 }
+
         else:
+
             return {
                 "reply": text,
                 "memories": [],
@@ -814,19 +805,30 @@ def parse_ai_response(text):
             }
 
     if not isinstance(data, dict):
+
         return {
             "reply": text,
             "memories": [],
             "forget": []
         }
 
-    reply = data.get("reply", "")
+    reply = data.get(
+        "reply",
+        ""
+    )
 
     if not isinstance(reply, str):
         reply = str(reply)
 
-    memories = data.get("memories", [])
-    forget = data.get("forget", [])
+    memories = data.get(
+        "memories",
+        []
+    )
+
+    forget = data.get(
+        "forget",
+        []
+    )
 
     if not isinstance(memories, list):
         memories = []
@@ -992,17 +994,8 @@ const chat = document.getElementById("chat");
 const sendButton = document.getElementById("sendButton");
 const statusElement = document.getElementById("status");
 
-
-// =========================================================
-// Request State
-// =========================================================
-
 let requestRunning = false;
 
-
-// =========================================================
-// Helpers
-// =========================================================
 
 function escapeHtml(text) {
 
@@ -1015,7 +1008,9 @@ function escapeHtml(text) {
 
 
 function scrollChat() {
+
     chat.scrollTop = chat.scrollHeight;
+
 }
 
 
@@ -1027,17 +1022,18 @@ function setBusy(busy) {
     input.disabled = busy;
 
     if (busy) {
+
         statusElement.textContent =
             "PRO يعالج الرسالة...";
+
     } else {
+
         statusElement.textContent = "";
+
     }
+
 }
 
-
-// =========================================================
-// Submit
-// =========================================================
 
 form.addEventListener(
     "submit",
@@ -1052,8 +1048,11 @@ form.addEventListener(
         const message = input.value.trim();
 
         if (!message) {
+
             input.focus();
+
             return;
+
         }
 
         setBusy(true);
@@ -1081,11 +1080,12 @@ form.addEventListener(
 
 
         // أقصى مدة للطلب من المتصفح.
-        // أطول قليلاً من مهلة Gemini.
         const timeoutId =
             setTimeout(
                 function() {
+
                     controller.abort();
+
                 },
                 55000
             );
@@ -1107,8 +1107,6 @@ form.addEventListener(
                                 "application/json"
                         },
 
-                        // لم نعد نرسل user_id من المتصفح.
-                        // السيرفر يحدد هوية محمود.
                         body: JSON.stringify({
                             message: message
                         }),
@@ -1139,6 +1137,7 @@ form.addEventListener(
                 throw new Error(
                     "الخادم رجع استجابة غير صالحة"
                 );
+
             }
 
 
@@ -1185,22 +1184,17 @@ form.addEventListener(
 
             clearTimeout(timeoutId);
 
-            // مهم جداً:
-            // الزر يرجع يشتغل مهما صار.
             setBusy(false);
 
             input.focus();
 
             scrollChat();
+
         }
 
     }
 );
 
-
-// =========================================================
-// Enter / Focus
-// =========================================================
 
 input.addEventListener(
     "keydown",
@@ -1210,11 +1204,15 @@ input.addEventListener(
             e.key === "Enter" &&
             !e.shiftKey
         ) {
+
             e.preventDefault();
 
             if (!requestRunning) {
+
                 form.requestSubmit();
+
             }
+
         }
 
     }
@@ -1237,6 +1235,7 @@ input.focus();
 
 @app.route("/")
 def home():
+
     return render_template_string(HTML)
 
 
@@ -1245,6 +1244,7 @@ def home():
     methods=["GET"]
 )
 def health():
+
     return jsonify({
         "status": "ok",
         "service": "PRO AI Agent"
@@ -1279,7 +1279,7 @@ def chat():
         ).strip()
 
         # -------------------------------------------------
-        # الهوية أصبحت ثابتة من السيرفر
+        # الهوية ثابتة من السيرفر
         # -------------------------------------------------
 
         user_id = PRO_OWNER_ID
@@ -1356,6 +1356,7 @@ def chat():
                 "[DB] User message saved"
             )
 
+
             # -------------------------------------------------
             # Conversation history
             # -------------------------------------------------
@@ -1380,6 +1381,7 @@ def chat():
             )
 
         finally:
+
             conn.close()
 
 
@@ -1396,7 +1398,9 @@ def chat():
 
         print("[MEMORY] Loading...")
 
-        memories = get_memories(user_id)
+        memories = get_memories(
+            user_id
+        )
 
         memory_text = format_memories(
             memories
@@ -1418,8 +1422,11 @@ def chat():
         for item in rows:
 
             if item["role"] == "user":
+
                 speaker = "محمود"
+
             else:
+
                 speaker = "PRO AI Agent"
 
             conversation += (
@@ -1444,7 +1451,9 @@ def chat():
         # Gemini
         # -------------------------------------------------
 
-        print("[GEMINI] Calling Gemini...")
+        print(
+            "[GEMINI] Calling Gemini..."
+        )
 
         gemini_start = time.time()
 
@@ -1452,7 +1461,7 @@ def chat():
         interaction = client.interactions.create(
             model="gemini-3.6-flash",
             input=prompt,
-            timeout=45
+            timeout=30
         )
 
 
@@ -1473,6 +1482,7 @@ def chat():
 
 
         if not raw_output:
+
             raise RuntimeError(
                 "Gemini رجع استجابة بدون نص"
             )
@@ -1492,7 +1502,9 @@ def chat():
             raw_output
         )
 
-        print("[MEMORY DEBUG] Parsed result:")
+        print(
+            "[MEMORY DEBUG] Parsed result:"
+        )
 
         print(
             json.dumps(
@@ -1504,17 +1516,28 @@ def chat():
 
         print(
             "[MEMORY DEBUG] memories count:",
-            len(result.get("memories", []))
+            len(
+                result.get(
+                    "memories",
+                    []
+                )
+            )
         )
 
         print(
             "[MEMORY DEBUG] forget count:",
-            len(result.get("forget", []))
+            len(
+                result.get(
+                    "forget",
+                    []
+                )
+            )
         )
 
         reply = result["reply"]
 
         if not reply:
+
             reply = "تمام يا محمود."
 
 
@@ -1681,6 +1704,7 @@ def chat():
             conn.commit()
 
         finally:
+
             conn.close()
 
 
@@ -1732,6 +1756,7 @@ def chat():
 
 
         print("")
+
         print(
             "[CHAT] ERROR after",
             round(elapsed, 2),
@@ -1772,10 +1797,6 @@ print("PRO AI Agent starting...")
 print("====================================")
 
 
-# مهم مع Gunicorn:
-# هذا يتم تنفيذه عند import app.py
-# بعكس if __name__ == "__main__"
-
 try:
 
     init_db()
@@ -1806,3 +1827,5 @@ if __name__ == "__main__":
         host="0.0.0.0",
         port=port
     )
+
+[/code]
