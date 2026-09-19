@@ -53,7 +53,6 @@ client = genai.Client(
     )
 )
 
-
 # =========================================================
 # System Prompt
 # =========================================================
@@ -277,7 +276,6 @@ important
 
 أنت PRO، وكيل محمود الشخصي.
 """
-
 
 # =========================================================
 # Database
@@ -1263,6 +1261,220 @@ def health():
     })
 
 
+# =========================================================
+# MEMORY TEST - لا يستخدم Gemini
+# =========================================================
+
+@app.route(
+    "/memory-test",
+    methods=["GET"]
+)
+def memory_test():
+
+    user_id = PRO_OWNER_ID
+
+    test_category = "important"
+    test_key = "memory_test"
+    test_value_1 = "اختبار ذاكرة PRO يعمل"
+    test_value_2 = "اختبار تحديث الذاكرة يعمل"
+
+    try:
+
+        print("")
+        print("====================================")
+        print("[MEMORY TEST] START")
+
+        # -------------------------------------------------
+        # 1. Save
+        # -------------------------------------------------
+
+        print(
+            "[MEMORY TEST] Saving first value..."
+        )
+
+        save_memory(
+            user_id,
+            test_category,
+            test_key,
+            test_value_1,
+            7
+        )
+
+        # -------------------------------------------------
+        # 2. Read
+        # -------------------------------------------------
+
+        memories_after_save = get_memories(
+            user_id
+        )
+
+        saved_memory = None
+
+        for memory in memories_after_save:
+
+            if (
+                memory["category"] == test_category
+                and
+                memory["memory_key"] == test_key
+            ):
+
+                saved_memory = memory
+
+                break
+
+        if not saved_memory:
+
+            raise RuntimeError(
+                "فشل حفظ الذاكرة"
+            )
+
+        print(
+            "[MEMORY TEST] Save OK:",
+            saved_memory
+        )
+
+        # -------------------------------------------------
+        # 3. Update
+        # -------------------------------------------------
+
+        print(
+            "[MEMORY TEST] Updating same memory key..."
+        )
+
+        save_memory(
+            user_id,
+            test_category,
+            test_key,
+            test_value_2,
+            9
+        )
+
+        # -------------------------------------------------
+        # 4. Read after update
+        # -------------------------------------------------
+
+        memories_after_update = get_memories(
+            user_id
+        )
+
+        updated_memory = None
+
+        for memory in memories_after_update:
+
+            if (
+                memory["category"] == test_category
+                and
+                memory["memory_key"] == test_key
+            ):
+
+                updated_memory = memory
+
+                break
+
+        if not updated_memory:
+
+            raise RuntimeError(
+                "فشل العثور على الذاكرة بعد التحديث"
+            )
+
+        if (
+            updated_memory["memory_value"]
+            != test_value_2
+        ):
+
+            raise RuntimeError(
+                "فشل تحديث قيمة الذاكرة"
+            )
+
+        print(
+            "[MEMORY TEST] Update OK:",
+            updated_memory
+        )
+
+        # -------------------------------------------------
+        # 5. Delete
+        # -------------------------------------------------
+
+        print(
+            "[MEMORY TEST] Deleting test memory..."
+        )
+
+        delete_memory(
+            user_id,
+            test_category,
+            test_key
+        )
+
+        # -------------------------------------------------
+        # 6. Verify deletion
+        # -------------------------------------------------
+
+        memories_after_delete = get_memories(
+            user_id
+        )
+
+        deleted_memory = None
+
+        for memory in memories_after_delete:
+
+            if (
+                memory["category"] == test_category
+                and
+                memory["memory_key"] == test_key
+            ):
+
+                deleted_memory = memory
+
+                break
+
+        if deleted_memory:
+
+            raise RuntimeError(
+                "فشل حذف الذاكرة"
+            )
+
+        print(
+            "[MEMORY TEST] Delete OK"
+        )
+
+        print(
+            "[MEMORY TEST] ALL TESTS PASSED"
+        )
+
+        print(
+            "===================================="
+        )
+
+        return jsonify({
+            "status": "ok",
+            "message": "اختبار الذاكرة نجح بالكامل",
+            "tests": {
+                "save": True,
+                "read": True,
+                "update": True,
+                "delete": True
+            }
+        })
+
+    except Exception as e:
+
+        print(
+            "[MEMORY TEST] FAILED:",
+            str(e)
+        )
+
+        traceback.print_exc()
+
+        print(
+            "===================================="
+        )
+
+        return jsonify({
+            "status": "error",
+            "message": str(e)
+        }), 500
+
+
 @app.route(
     "/chat",
     methods=["POST"]
@@ -1306,7 +1518,6 @@ def chat():
                 "error": "اكتب رسالة أولاً"
             }), 400
 
-
         print(
             "[CHAT] user_id:",
             user_id
@@ -1316,7 +1527,6 @@ def chat():
             "[CHAT] message:",
             message[:100]
         )
-
 
         # -------------------------------------------------
         # Database - user + message
@@ -1368,7 +1578,6 @@ def chat():
                 "[DB] User message saved"
             )
 
-
             # -------------------------------------------------
             # Conversation history
             # -------------------------------------------------
@@ -1396,13 +1605,11 @@ def chat():
 
             conn.close()
 
-
         print(
             "[DB] Conversation loaded:",
             len(rows),
             "messages"
         )
-
 
         # -------------------------------------------------
         # Memories
@@ -1423,7 +1630,6 @@ def chat():
             len(memories),
             "memories"
         )
-
 
         # -------------------------------------------------
         # Build conversation
@@ -1448,7 +1654,6 @@ def chat():
                 + "\n"
             )
 
-
         prompt = (
             SYSTEM_PROMPT
             + "\n\n===== الذاكرة =====\n"
@@ -1457,7 +1662,6 @@ def chat():
             + conversation
             + "\n\nأجب على آخر رسالة."
         )
-
 
         # -------------------------------------------------
         # Gemini
@@ -1540,12 +1744,10 @@ def chat():
                     + error_text
             }), 502
 
-
         gemini_time = (
             time.time()
             - gemini_start
         )
-
 
         print(
             "[GEMINI] Response received in",
@@ -1553,9 +1755,7 @@ def chat():
             "seconds"
         )
 
-
         raw_output = interaction.output_text
-
 
         if not raw_output:
 
@@ -1563,12 +1763,10 @@ def chat():
                 "Gemini رجع استجابة بدون نص"
             )
 
-
         print(
             "[GEMINI] Output length:",
             len(raw_output)
         )
-
 
         # -------------------------------------------------
         # Parse AI response
@@ -1616,7 +1814,6 @@ def chat():
 
             reply = "تمام يا محمود."
 
-
         # -------------------------------------------------
         # Save memories
         # -------------------------------------------------
@@ -1624,7 +1821,6 @@ def chat():
         print(
             "[MEMORY] Processing new memories..."
         )
-
 
         for memory in result["memories"]:
 
@@ -1634,14 +1830,12 @@ def chat():
             ):
                 continue
 
-
             category = str(
                 memory.get(
                     "category",
                     ""
                 )
             ).strip().lower()
-
 
             memory_key = str(
                 memory.get(
@@ -1650,7 +1844,6 @@ def chat():
                 )
             ).strip()
 
-
             memory_value = str(
                 memory.get(
                     "memory_value",
@@ -1658,27 +1851,22 @@ def chat():
                 )
             ).strip()
 
-
             importance = memory.get(
                 "importance",
                 5
             )
 
-
             if category not in ALLOWED_CATEGORIES:
                 continue
 
-
             if not memory_key or not memory_value:
                 continue
-
 
             print(
                 "[MEMORY] Saving:",
                 category,
                 memory_key
             )
-
 
             save_memory(
                 user_id,
@@ -1688,11 +1876,9 @@ def chat():
                 importance
             )
 
-
         print(
             "[MEMORY] New memories processed"
         )
-
 
         # -------------------------------------------------
         # Forget memories
@@ -1706,14 +1892,12 @@ def chat():
             ):
                 continue
 
-
             category = str(
                 memory.get(
                     "category",
                     ""
                 )
             ).strip().lower()
-
 
             memory_key = str(
                 memory.get(
@@ -1722,14 +1906,11 @@ def chat():
                 )
             ).strip()
 
-
             if category not in ALLOWED_CATEGORIES:
                 continue
 
-
             if not memory_key:
                 continue
-
 
             print(
                 "[MEMORY] Forget:",
@@ -1737,13 +1918,11 @@ def chat():
                 memory_key
             )
 
-
             delete_memory(
                 user_id,
                 category,
                 memory_key
             )
-
 
         # -------------------------------------------------
         # Save assistant reply
@@ -1752,7 +1931,6 @@ def chat():
         print(
             "[DB] Saving assistant reply..."
         )
-
 
         conn = get_db()
 
@@ -1783,7 +1961,6 @@ def chat():
 
             conn.close()
 
-
         # -------------------------------------------------
         # Guarantee name memory
         # -------------------------------------------------
@@ -1796,7 +1973,6 @@ def chat():
             10
         )
 
-
         # -------------------------------------------------
         # Done
         # -------------------------------------------------
@@ -1805,7 +1981,6 @@ def chat():
             time.time()
             - request_start
         )
-
 
         print(
             "[CHAT] DONE in",
@@ -1817,11 +1992,9 @@ def chat():
             "===================================="
         )
 
-
         return jsonify({
             "reply": reply
         })
-
 
     except Exception as e:
 
@@ -1829,7 +2002,6 @@ def chat():
             time.time()
             - request_start
         )
-
 
         print("")
 
@@ -1855,7 +2027,6 @@ def chat():
             "===================================="
         )
 
-
         return jsonify({
             "error":
                 "صار خطأ داخل الوكيل: "
@@ -1871,7 +2042,6 @@ print("")
 print("====================================")
 print("PRO AI Agent starting...")
 print("====================================")
-
 
 try:
 
