@@ -1256,14 +1256,34 @@ def chat():
         # -------------------------------------------------
         # Parse AI response
         # -------------------------------------------------
+result = parse_ai_response(
+    raw_output
+)
 
-        result = parse_ai_response(
-            raw_output
-        )
+print("[MEMORY DEBUG] Parsed result:")
+print(
+    json.dumps(
+        result,
+        ensure_ascii=False,
+        indent=2
+    )
+)
 
-        reply = result["reply"]
+print(
+    "[MEMORY DEBUG] memories count:",
+    len(result.get("memories", []))
+)
 
+print(
+    "[MEMORY DEBUG] forget count:",
+    len(result.get("forget", []))
+)
 
+reply = result["reply"]
+
+if not reply:
+    reply = "تمام يا محمود."
+        
         if not reply:
             reply = "تمام يا محمود."
 
