@@ -1820,6 +1820,356 @@ def memory_ai_test():
         }), 500
 
 
+# =========================================================
+# MEMORY CONTEXT TEST
+# يختبر ربط الذاكرة الفعلية بالـ Prompt المستخدم في /chat
+# لا يستخدم Gemini
+# =========================================================
+
+@app.route(
+    "/memory-context-test",
+    methods=["GET"]
+)
+def memory_context_test():
+
+    user_id = PRO_OWNER_ID
+
+    test_category = "important"
+
+    # مفتاح وقيمة فريدين جداً
+    # غير موجودين في SYSTEM_PROMPT
+    test_key = "memory_context_test_73921"
+    test_value = "MEMORY_ONLY_TEST_73921"
+
+    test_results = {
+        "memory_saved": False,
+        "memory_retrieved": False,
+        "memory_formatted": False,
+        "memory_in_prompt": False,
+        "memory_deleted": False
+    }
+
+    try:
+
+        print("")
+        print("====================================")
+        print("[MEMORY CONTEXT TEST] START")
+
+        # -------------------------------------------------
+        # 1. تأكد أن القيمة ليست موجودة في SYSTEM_PROMPT
+        # -------------------------------------------------
+
+        if test_value in SYSTEM_PROMPT:
+
+            raise RuntimeError(
+                "قيمة الاختبار موجودة داخل SYSTEM_PROMPT "
+                "ولا يمكن استخدامها لإثبات مصدر الذاكرة"
+            )
+
+        print(
+            "[MEMORY CONTEXT TEST] Unique marker verified"
+        )
+
+        # -------------------------------------------------
+        # 2. Save test memory
+        # -------------------------------------------------
+
+        print(
+            "[MEMORY CONTEXT TEST] Saving test memory..."
+        )
+
+        save_memory(
+            user_id,
+            test_category,
+            test_key,
+            test_value,
+            10
+        )
+
+        test_results["memory_saved"] = True
+
+        print(
+            "[MEMORY CONTEXT TEST] Save OK"
+        )
+
+        # -------------------------------------------------
+        # 3. Read memory again from database
+        # -------------------------------------------------
+
+        print(
+            "[MEMORY CONTEXT TEST] Reading memory..."
+        )
+
+        memories = get_memories(
+            user_id
+        )
+
+        found_memory = None
+
+        for memory in memories:
+
+            if (
+                memory["category"] == test_category
+                and
+                memory["memory_key"] == test_key
+                and
+                memory["memory_value"] == test_value
+            ):
+
+                found_memory = memory
+                break
+
+        if not found_memory:
+
+            raise RuntimeError(
+                "الذاكرة التجريبية لم ترجع من PostgreSQL"
+            )
+
+        test_results["memory_retrieved"] = True
+
+        print(
+            "[MEMORY CONTEXT TEST] Memory retrieved:",
+            found_memory
+        )
+
+        # -------------------------------------------------
+        # 4. Format memories
+        # -------------------------------------------------
+
+        print(
+            "[MEMORY CONTEXT TEST] Formatting memories..."
+        )
+
+        memory_text = format_memories(
+            memories
+        )
+
+        if not memory_text:
+
+            raise RuntimeError(
+                "format_memories رجعت نص فارغ"
+            )
+
+        if test_value not in memory_text:
+
+            raise RuntimeError(
+                "قيمة الذاكرة غير موجودة في memory_text"
+            )
+
+        if test_key not in memory_text:
+
+            raise RuntimeError(
+                "memory_key غير موجود في memory_text"
+            )
+
+        test_results["memory_formatted"] = True
+
+        print(
+            "[MEMORY CONTEXT TEST] Formatting OK"
+        )
+
+        print(
+            "[MEMORY CONTEXT TEST] memory_text:"
+        )
+
+        print(
+            memory_text
+        )
+
+        # -------------------------------------------------
+        # 5. Build نفس Prompt المستخدم في /chat
+        # -------------------------------------------------
+
+        print(
+            "[MEMORY CONTEXT TEST] Building chat prompt..."
+        )
+
+        test_conversation = (
+            "محمود: اختبار ربط الذاكرة\n"
+        )
+
+        prompt = (
+            SYSTEM_PROMPT
+            + "\n\n===== الذاكرة =====\n"
+            + memory_text
+            + "\n\n===== المحادثة =====\n"
+            + test_conversation
+            + "\n\nأجب على آخر رسالة."
+        )
+
+        # -------------------------------------------------
+        # 6. Verify memory exists inside actual prompt
+        # -------------------------------------------------
+
+        if test_value not in prompt:
+
+            raise RuntimeError(
+                "الذاكرة لم تدخل داخل الـ prompt"
+            )
+
+        if test_key not in prompt:
+
+            raise RuntimeError(
+                "memory_key لم يدخل داخل الـ prompt"
+            )
+
+        test_results["memory_in_prompt"] = True
+
+        print(
+            "[MEMORY CONTEXT TEST] Memory found inside prompt"
+        )
+
+        # -------------------------------------------------
+        # 7. Verify section placement
+        # -------------------------------------------------
+
+        memory_section_marker = (
+            "===== الذاكرة ====="
+        )
+
+        conversation_section_marker = (
+            "===== المحادثة ====="
+        )
+
+        memory_section_start = prompt.find(
+            memory_section_marker
+        )
+
+        conversation_section_start = prompt.find(
+            conversation_section_marker
+        )
+
+        if memory_section_start == -1:
+
+            raise RuntimeError(
+                "قسم الذاكرة غير موجود في الـ prompt"
+            )
+
+        if conversation_section_start == -1:
+
+            raise RuntimeError(
+                "قسم المحادثة غير موجود في الـ prompt"
+            )
+
+        if memory_section_start >= conversation_section_start:
+
+            raise RuntimeError(
+                "ترتيب أقسام الـ prompt غير صحيح"
+            )
+
+        print(
+            "[MEMORY CONTEXT TEST] Prompt structure OK"
+        )
+
+        # -------------------------------------------------
+        # 8. Delete test memory
+        # -------------------------------------------------
+
+        print(
+            "[MEMORY CONTEXT TEST] Deleting test memory..."
+        )
+
+        delete_memory(
+            user_id,
+            test_category,
+            test_key
+        )
+
+        # -------------------------------------------------
+        # 9. Verify deletion
+        # -------------------------------------------------
+
+        memories_after_delete = get_memories(
+            user_id
+        )
+
+        deleted_memory = None
+
+        for memory in memories_after_delete:
+
+            if (
+                memory["category"] == test_category
+                and
+                memory["memory_key"] == test_key
+            ):
+
+                deleted_memory = memory
+                break
+
+        if deleted_memory:
+
+            raise RuntimeError(
+                "فشل حذف ذاكرة الاختبار"
+            )
+
+        test_results["memory_deleted"] = True
+
+        print(
+            "[MEMORY CONTEXT TEST] Delete OK"
+        )
+
+        # -------------------------------------------------
+        # Final
+        # -------------------------------------------------
+
+        print(
+            "[MEMORY CONTEXT TEST] ALL TESTS PASSED"
+        )
+
+        print(
+            "===================================="
+        )
+
+        return jsonify({
+            "status": "ok",
+            "message": "اختبار ربط الذاكرة بسياق PRO نجح بالكامل",
+            "tests": test_results
+        })
+
+    except Exception as e:
+
+        print(
+            "[MEMORY CONTEXT TEST] FAILED:",
+            str(e)
+        )
+
+        traceback.print_exc()
+
+        # -------------------------------------------------
+        # Cleanup حتى لو فشل الاختبار
+        # -------------------------------------------------
+
+        try:
+
+            delete_memory(
+                user_id,
+                test_category,
+                test_key
+            )
+
+            print(
+                "[MEMORY CONTEXT TEST] Cleanup completed"
+            )
+
+        except Exception:
+
+            print(
+                "[MEMORY CONTEXT TEST] Cleanup failed"
+            )
+
+            traceback.print_exc()
+
+        print(
+            "===================================="
+        )
+
+        return jsonify({
+            "status": "error",
+            "message": str(e),
+            "tests": test_results
+        }), 500
+
+
 @app.route(
     "/chat",
     methods=["POST"]
