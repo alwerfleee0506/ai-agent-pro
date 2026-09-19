@@ -32,7 +32,6 @@ ALLOWED_CATEGORIES = {
 # =========================================================
 # Gemini
 # =========================================================
-
 if not GEMINI_API_KEY:
     print("[STARTUP] WARNING: GEMINI_API_KEY غير موجود")
 
