@@ -37,16 +37,21 @@ if not GEMINI_API_KEY:
 
 # مهم:
 # محاولة واحدة فقط بدون Retry طويل
-# والـ HTTP timeout = 30 ثانية
+# والـ HTTP timeout = 15 ثانية
 client = genai.Client(
     api_key=GEMINI_API_KEY,
     http_options=types.HttpOptions(
-        timeout=30000,
+        timeout=15000,
         retry_options=types.HttpRetryOptions(
-            attempts=1
+            attempts=1,
+            initial_delay=0,
+            max_delay=0,
+            jitter=0,
+            http_status_codes=[]
         )
     )
 )
+    
 
 # =========================================================
 # System Prompt
