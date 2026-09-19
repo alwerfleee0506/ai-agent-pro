@@ -530,3 +530,1048 @@ def parse_ai_response(text):
                 data = json.loads(
                     cleaned[start:end + 1]
                 )
+            except Exception:
+                return {
+                    "reply": text,
+                    "memories": [],
+                    "forget": []
+                }
+        else:
+            return {
+                "reply": text,
+                "memories": [],
+                "forget": []
+            }
+
+    if not isinstance(data, dict):
+        return {
+            "reply": text,
+            "memories": [],
+            "forget": []
+        }
+
+    reply = data.get("reply", "")
+
+    if not isinstance(reply, str):
+        reply = str(reply)
+
+    memories = data.get("memories", [])
+    forget = data.get("forget", [])
+
+    if not isinstance(memories, list):
+        memories = []
+
+    if not isinstance(forget, list):
+        forget = []
+
+    return {
+        "reply": reply.strip(),
+        "memories": memories,
+        "forget": forget
+    }
+
+
+# =========================================================
+# HTML / JavaScript
+# =========================================================
+
+HTML = r"""
+<!DOCTYPE html>
+<html lang="ar" dir="rtl">
+
+<head>
+
+<meta charset="UTF-8">
+
+<meta name="viewport"
+content="width=device-width, initial-scale=1.0">
+
+<title>PRO AI Agent</title>
+
+<style>
+
+* {
+    box-sizing: border-box;
+}
+
+body {
+    font-family: Arial, sans-serif;
+    background: #111;
+    color: white;
+    margin: 0;
+    padding: 20px;
+}
+
+.container {
+    max-width: 600px;
+    margin: auto;
+}
+
+h1 {
+    text-align: center;
+}
+
+#chat {
+    height: 60vh;
+    min-height: 300px;
+    overflow-y: auto;
+    padding: 15px;
+    background: #1c1c1c;
+    border-radius: 15px;
+    margin-bottom: 15px;
+}
+
+.message {
+    padding: 10px;
+    margin: 8px 0;
+    border-radius: 10px;
+    white-space: pre-wrap;
+    word-wrap: break-word;
+}
+
+.user {
+    background: #333;
+}
+
+.ai {
+    background: #222;
+}
+
+form {
+    display: flex;
+    gap: 8px;
+}
+
+input {
+    flex: 1;
+    min-width: 0;
+    padding: 14px;
+    border-radius: 10px;
+    border: none;
+    font-size: 16px;
+}
+
+button {
+    padding: 14px 20px;
+    border: none;
+    border-radius: 10px;
+    cursor: pointer;
+    font-size: 16px;
+}
+
+button:disabled,
+input:disabled {
+    opacity: 0.6;
+}
+
+.status {
+    text-align: center;
+    font-size: 13px;
+    color: #aaa;
+    margin-top: 8px;
+}
+
+</style>
+
+</head>
+
+<body>
+
+<div class="container">
+
+<h1>🤖 PRO AI Agent</h1>
+
+<div id="chat">
+
+<div class="message ai">
+السلام عليكم محمود 👋
+أنا PRO AI Agent.
+شن نقدر نساعدك فيه اليوم؟
+</div>
+
+</div>
+
+<form id="form">
+
+<input
+id="message"
+placeholder="اكتب رسالتك..."
+autocomplete="off"
+>
+
+<button
+id="sendButton"
+type="submit"
+>
+إرسال
+</button>
+
+</form>
+
+<div id="status" class="status"></div>
+
+</div>
+
+<script>
+
+"use strict";
+
+const form = document.getElementById("form");
+const input = document.getElementById("message");
+const chat = document.getElementById("chat");
+const sendButton = document.getElementById("sendButton");
+const statusElement = document.getElementById("status");
+
+
+// =========================================================
+// User ID
+// =========================================================
+
+let userId = null;
+
+try {
+    userId = localStorage.getItem("pro_ai_user_id");
+} catch (error) {
+    console.warn("localStorage unavailable:", error);
+}
+
+if (!userId) {
+
+    if (
+        window.crypto &&
+        typeof window.crypto.randomUUID === "function"
+    ) {
+        userId = window.crypto.randomUUID();
+    } else {
+        userId =
+            "pro-" +
+            Date.now() +
+            "-" +
+            Math.random()
+                .toString(36)
+                .substring(2, 12);
+    }
+
+    try {
+        localStorage.setItem(
+            "pro_ai_user_id",
+            userId
+        );
+    } catch (error) {
+        console.warn(
+            "Could not save user ID:",
+            error
+        );
+    }
+}
+
+
+// =========================================================
+// Helpers
+// =========================================================
+
+let requestRunning = false;
+
+function escapeHtml(text) {
+
+    const div = document.createElement("div");
+
+    div.textContent = text;
+
+    return div.innerHTML;
+}
+
+
+function scrollChat() {
+    chat.scrollTop = chat.scrollHeight;
+}
+
+
+function setBusy(busy) {
+
+    requestRunning = busy;
+
+    sendButton.disabled = busy;
+    input.disabled = busy;
+
+    if (busy) {
+        statusElement.textContent =
+            "PRO يعالج الرسالة...";
+    } else {
+        statusElement.textContent = "";
+    }
+}
+
+
+// =========================================================
+// Submit
+// =========================================================
+
+form.addEventListener(
+    "submit",
+    async function(e) {
+
+        e.preventDefault();
+
+        if (requestRunning) {
+            return;
+        }
+
+        const message = input.value.trim();
+
+        if (!message) {
+            input.focus();
+            return;
+        }
+
+        setBusy(true);
+
+        chat.innerHTML +=
+            '<div class="message user">' +
+            escapeHtml(message) +
+            '</div>';
+
+        input.value = "";
+
+        const loading =
+            document.createElement("div");
+
+        loading.className = "message ai";
+        loading.textContent = "جاري التفكير...";
+
+        chat.appendChild(loading);
+
+        scrollChat();
+
+
+        const controller =
+            new AbortController();
+
+
+        // أقصى مدة للطلب من المتصفح.
+        // أطول قليلاً من مهلة Gemini.
+        const timeoutId =
+            setTimeout(
+                function() {
+                    controller.abort();
+                },
+                55000
+            );
+
+
+        try {
+
+            const response =
+                await fetch(
+                    "/chat",
+                    {
+                        method: "POST",
+
+                        headers: {
+                            "Content-Type":
+                                "application/json",
+
+                            "Accept":
+                                "application/json"
+                        },
+
+                        body: JSON.stringify({
+                            message: message,
+                            user_id: userId
+                        }),
+
+                        signal: controller.signal
+                    }
+                );
+
+
+            const text =
+                await response.text();
+
+
+            let data = null;
+
+
+            try {
+
+                data = JSON.parse(text);
+
+            } catch (jsonError) {
+
+                console.error(
+                    "Invalid JSON from server:",
+                    text
+                );
+
+                throw new Error(
+                    "الخادم رجع استجابة غير صالحة"
+                );
+            }
+
+
+            if (!response.ok) {
+
+                loading.textContent =
+                    data.error ||
+                    "حدث خطأ داخل الخادم.";
+
+            } else {
+
+                loading.textContent =
+                    data.reply ||
+                    "PRO ما رجعش رد.";
+
+            }
+
+
+        } catch (error) {
+
+            console.error(
+                "CHAT ERROR:",
+                error
+            );
+
+
+            if (
+                error &&
+                error.name === "AbortError"
+            ) {
+
+                loading.textContent =
+                    "الطلب أخذ وقت طويل. Render أو Gemini تأخروا. جرب مرة ثانية.";
+
+            } else {
+
+                loading.textContent =
+                    "تعذر الاتصال بالوكيل.\n" +
+                    "افتح Logs في Render لمعرفة الخطأ.";
+
+            }
+
+        } finally {
+
+            clearTimeout(timeoutId);
+
+            // مهم جداً:
+            // الزر يرجع يشتغل مهما صار.
+            setBusy(false);
+
+            input.focus();
+
+            scrollChat();
+        }
+
+    }
+);
+
+
+// =========================================================
+// Enter / Focus
+// =========================================================
+
+input.addEventListener(
+    "keydown",
+    function(e) {
+
+        if (
+            e.key === "Enter" &&
+            !e.shiftKey
+        ) {
+            e.preventDefault();
+
+            if (!requestRunning) {
+                form.requestSubmit();
+            }
+        }
+
+    }
+);
+
+
+input.focus();
+
+</script>
+
+</body>
+
+</html>
+"""
+
+
+# =========================================================
+# Routes
+# =========================================================
+
+@app.route("/")
+def home():
+    return render_template_string(HTML)
+
+
+@app.route(
+    "/health",
+    methods=["GET"]
+)
+def health():
+    return jsonify({
+        "status": "ok",
+        "service": "PRO AI Agent"
+    })
+
+
+@app.route(
+    "/chat",
+    methods=["POST"]
+)
+def chat():
+
+    request_start = time.time()
+
+    print("")
+    print("====================================")
+    print("[CHAT] START")
+
+    try:
+
+        # -------------------------------------------------
+        # Read request
+        # -------------------------------------------------
+
+        data = request.get_json(
+            silent=True
+        ) or {}
+
+        message = data.get(
+            "message",
+            ""
+        ).strip()
+
+        user_id = data.get(
+            "user_id",
+            ""
+        ).strip()
+
+        if not user_id:
+            user_id = str(uuid.uuid4())
+
+        if not message:
+
+            print(
+                "[CHAT] ERROR: empty message"
+            )
+
+            return jsonify({
+                "error": "اكتب رسالة أولاً"
+            }), 400
+
+
+        print(
+            "[CHAT] user_id:",
+            user_id
+        )
+
+        print(
+            "[CHAT] message:",
+            message[:100]
+        )
+
+
+        # -------------------------------------------------
+        # Database - user + message
+        # -------------------------------------------------
+
+        print("[DB] Connecting...")
+
+        conn = get_db()
+
+        print("[DB] Connected")
+
+        try:
+
+            cur = conn.cursor(
+                cursor_factory=RealDictCursor
+            )
+
+            cur.execute(
+                """
+                INSERT INTO pro_users (user_id)
+                VALUES (%s)
+
+                ON CONFLICT (user_id)
+                DO NOTHING
+                """,
+                (user_id,)
+            )
+
+            cur.execute(
+                """
+                INSERT INTO pro_messages
+                (
+                    user_id,
+                    role,
+                    message
+                )
+                VALUES (%s, %s, %s)
+                """,
+                (
+                    user_id,
+                    "user",
+                    message
+                )
+            )
+
+            conn.commit()
+
+            print(
+                "[DB] User message saved"
+            )
+
+            # -------------------------------------------------
+            # Conversation history
+            # -------------------------------------------------
+
+            cur.execute(
+                """
+                SELECT
+                    role,
+                    message
+                FROM pro_messages
+                WHERE user_id = %s
+                ORDER BY id DESC
+                LIMIT 20
+                """,
+                (user_id,)
+            )
+
+            rows = list(
+                reversed(
+                    cur.fetchall()
+                )
+            )
+
+        finally:
+            conn.close()
+
+
+        print(
+            "[DB] Conversation loaded:",
+            len(rows),
+            "messages"
+        )
+
+
+        # -------------------------------------------------
+        # Memories
+        # -------------------------------------------------
+
+        print("[MEMORY] Loading...")
+
+        memories = get_memories(user_id)
+
+        memory_text = format_memories(
+            memories
+        )
+
+        print(
+            "[MEMORY] Loaded:",
+            len(memories),
+            "memories"
+        )
+
+
+        # -------------------------------------------------
+        # Build conversation
+        # -------------------------------------------------
+
+        conversation = ""
+
+        for item in rows:
+
+            if item["role"] == "user":
+                speaker = "محمود"
+            else:
+                speaker = "PRO AI Agent"
+
+            conversation += (
+                speaker
+                + ": "
+                + item["message"]
+                + "\n"
+            )
+
+
+        prompt = (
+            SYSTEM_PROMPT
+            + "\n\n===== الذاكرة =====\n"
+            + memory_text
+            + "\n\n===== المحادثة =====\n"
+            + conversation
+            + "\n\nأجب على آخر رسالة."
+        )
+
+
+        # -------------------------------------------------
+        # Gemini
+        # -------------------------------------------------
+
+        print("[GEMINI] Calling Gemini...")
+
+        gemini_start = time.time()
+
+
+        interaction = client.interactions.create(
+            model="gemini-3.6-flash",
+            input=prompt,
+            timeout=45
+        )
+
+
+        gemini_time = (
+            time.time()
+            - gemini_start
+        )
+
+
+        print(
+            "[GEMINI] Response received in",
+            round(gemini_time, 2),
+            "seconds"
+        )
+
+
+        raw_output = interaction.output_text
+
+
+        if not raw_output:
+            raise RuntimeError(
+                "Gemini رجع استجابة بدون نص"
+            )
+
+
+        print(
+            "[GEMINI] Output length:",
+            len(raw_output)
+        )
+
+
+        # -------------------------------------------------
+        # Parse AI response
+        # -------------------------------------------------
+
+        result = parse_ai_response(
+            raw_output
+        )
+
+        print("[MEMORY DEBUG] Parsed result:")
+
+        print(
+            json.dumps(
+                result,
+                ensure_ascii=False,
+                indent=2
+            )
+        )
+
+        print(
+            "[MEMORY DEBUG] memories count:",
+            len(result.get("memories", []))
+        )
+
+        print(
+            "[MEMORY DEBUG] forget count:",
+            len(result.get("forget", []))
+        )
+
+        reply = result["reply"]
+
+        if not reply:
+            reply = "تمام يا محمود."
+
+
+        # -------------------------------------------------
+        # Save memories
+        # -------------------------------------------------
+
+        print(
+            "[MEMORY] Processing new memories..."
+        )
+
+
+        for memory in result["memories"]:
+
+            if not isinstance(
+                memory,
+                dict
+            ):
+                continue
+
+
+            category = str(
+                memory.get(
+                    "category",
+                    ""
+                )
+            ).strip().lower()
+
+
+            memory_key = str(
+                memory.get(
+                    "memory_key",
+                    ""
+                )
+            ).strip()
+
+
+            memory_value = str(
+                memory.get(
+                    "memory_value",
+                    ""
+                )
+            ).strip()
+
+
+            importance = memory.get(
+                "importance",
+                5
+            )
+
+
+            if category not in ALLOWED_CATEGORIES:
+                continue
+
+
+            if not memory_key or not memory_value:
+                continue
+
+
+            print(
+                "[MEMORY] Saving:",
+                category,
+                memory_key
+            )
+
+
+            save_memory(
+                user_id,
+                category,
+                memory_key,
+                memory_value,
+                importance
+            )
+
+
+        print(
+            "[MEMORY] New memories processed"
+        )
+
+
+        # -------------------------------------------------
+        # Forget memories
+        # -------------------------------------------------
+
+        for memory in result["forget"]:
+
+            if not isinstance(
+                memory,
+                dict
+            ):
+                continue
+
+
+            category = str(
+                memory.get(
+                    "category",
+                    ""
+                )
+            ).strip().lower()
+
+
+            memory_key = str(
+                memory.get(
+                    "memory_key",
+                    ""
+                )
+            ).strip()
+
+
+            if category not in ALLOWED_CATEGORIES:
+                continue
+
+
+            if not memory_key:
+                continue
+
+
+            print(
+                "[MEMORY] Forget:",
+                category,
+                memory_key
+            )
+
+
+            delete_memory(
+                user_id,
+                category,
+                memory_key
+            )
+
+
+        # -------------------------------------------------
+        # Save assistant reply
+        # -------------------------------------------------
+
+        print(
+            "[DB] Saving assistant reply..."
+        )
+
+
+        conn = get_db()
+
+        try:
+
+            cur = conn.cursor()
+
+            cur.execute(
+                """
+                INSERT INTO pro_messages
+                (
+                    user_id,
+                    role,
+                    message
+                )
+                VALUES (%s, %s, %s)
+                """,
+                (
+                    user_id,
+                    "assistant",
+                    reply
+                )
+            )
+
+            conn.commit()
+
+        finally:
+            conn.close()
+
+
+        # -------------------------------------------------
+        # Guarantee name memory
+        # -------------------------------------------------
+
+        save_memory(
+            user_id,
+            "personal",
+            "name",
+            "محمود",
+            10
+        )
+
+
+        # -------------------------------------------------
+        # Done
+        # -------------------------------------------------
+
+        total_time = (
+            time.time()
+            - request_start
+        )
+
+
+        print(
+            "[CHAT] DONE in",
+            round(total_time, 2),
+            "seconds"
+        )
+
+        print(
+            "===================================="
+        )
+
+
+        return jsonify({
+            "reply": reply,
+            "user_id": user_id
+        })
+
+
+    except Exception as e:
+
+        elapsed = (
+            time.time()
+            - request_start
+        )
+
+
+        print("")
+        print(
+            "[CHAT] ERROR after",
+            round(elapsed, 2),
+            "seconds"
+        )
+
+        print(
+            "[CHAT] ERROR TYPE:",
+            type(e).__name__
+        )
+
+        print(
+            "[CHAT] ERROR:",
+            str(e)
+        )
+
+        traceback.print_exc()
+
+        print(
+            "===================================="
+        )
+
+
+        return jsonify({
+            "error":
+                "صار خطأ داخل الوكيل: "
+                + str(e)
+        }), 500
+
+
+# =========================================================
+# Startup
+# =========================================================
+
+print("")
+print("====================================")
+print("PRO AI Agent starting...")
+print("====================================")
+
+
+# مهم مع Gunicorn:
+# هذا يتم تنفيذه عند import app.py
+# بعكس if __name__ == "__main__"
+try:
+
+    init_db()
+
+except Exception as e:
+
+    print(
+        "[STARTUP] Database initialization failed:"
+    )
+
+    print(
+        str(e)
+    )
+
+    traceback.print_exc()
+
+
+if __name__ == "__main__":
+
+    port = int(
+        os.environ.get(
+            "PORT",
+            10000
+        )
+    )
+
+    app.run(
+        host="0.0.0.0",
+        port=port
+    )
