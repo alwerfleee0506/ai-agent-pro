@@ -1475,6 +1475,351 @@ def memory_test():
         }), 500
 
 
+# =========================================================
+# MEMORY AI TEST - يحاكي Gemini بدون استخدام Gemini
+# =========================================================
+
+@app.route(
+    "/memory-ai-test",
+    methods=["GET"]
+)
+def memory_ai_test():
+
+    user_id = PRO_OWNER_ID
+
+    test_category = "projects"
+    test_key = "pro_role"
+
+    test_value_1 = "PRO هو الوكيل الذكي الشخصي لمحمود"
+    test_value_2 = "PRO هو الوكيل الشخصي الدائم لمحمود"
+
+    try:
+
+        print("")
+        print("====================================")
+        print("[MEMORY AI TEST] START")
+
+        # -------------------------------------------------
+        # 1. Fake AI JSON
+        # -------------------------------------------------
+
+        fake_ai_output = json.dumps(
+            {
+                "reply": "تم يا محمود.",
+                "memories": [
+                    {
+                        "category": test_category,
+                        "memory_key": test_key,
+                        "memory_value": test_value_1,
+                        "importance": 10
+                    }
+                ],
+                "forget": []
+            },
+            ensure_ascii=False
+        )
+
+        print(
+            "[MEMORY AI TEST] Fake AI output:"
+        )
+
+        print(
+            fake_ai_output
+        )
+
+        # -------------------------------------------------
+        # 2. Parse fake AI response
+        # -------------------------------------------------
+
+        result = parse_ai_response(
+            fake_ai_output
+        )
+
+        print(
+            "[MEMORY AI TEST] Parsed result:"
+        )
+
+        print(
+            json.dumps(
+                result,
+                ensure_ascii=False,
+                indent=2
+            )
+        )
+
+        if not isinstance(result, dict):
+            raise RuntimeError(
+                "Parser رجع نتيجة غير صحيحة"
+            )
+
+        if result.get("reply") != "تم يا محمود.":
+            raise RuntimeError(
+                "فشل اختبار reply في parser"
+            )
+
+        if not isinstance(
+            result.get("memories"),
+            list
+        ):
+            raise RuntimeError(
+                "فشل memories في parser"
+            )
+
+        if not isinstance(
+            result.get("forget"),
+            list
+        ):
+            raise RuntimeError(
+                "فشل forget في parser"
+            )
+
+        if len(result["memories"]) != 1:
+            raise RuntimeError(
+                "Parser لم يرجع memory واحدة"
+            )
+
+        parsed_memory = result["memories"][0]
+
+        if not isinstance(
+            parsed_memory,
+            dict
+        ):
+            raise RuntimeError(
+                "الـ memory الناتجة من parser ليست object"
+            )
+
+        if (
+            parsed_memory.get("category")
+            != test_category
+        ):
+            raise RuntimeError(
+                "category غير صحيحة"
+            )
+
+        if (
+            parsed_memory.get("memory_key")
+            != test_key
+        ):
+            raise RuntimeError(
+                "memory_key غير صحيح"
+            )
+
+        if (
+            parsed_memory.get("memory_value")
+            != test_value_1
+        ):
+            raise RuntimeError(
+                "memory_value غير صحيحة"
+            )
+
+        print(
+            "[MEMORY AI TEST] Parser OK"
+        )
+
+        # -------------------------------------------------
+        # 3. Save memory
+        # -------------------------------------------------
+
+        print(
+            "[MEMORY AI TEST] Saving parsed memory..."
+        )
+
+        save_memory(
+            user_id,
+            parsed_memory["category"],
+            parsed_memory["memory_key"],
+            parsed_memory["memory_value"],
+            parsed_memory.get("importance", 5)
+        )
+
+        # -------------------------------------------------
+        # 4. Read memory
+        # -------------------------------------------------
+
+        memories_after_save = get_memories(
+            user_id
+        )
+
+        saved_memory = None
+
+        for memory in memories_after_save:
+
+            if (
+                memory["category"] == test_category
+                and
+                memory["memory_key"] == test_key
+            ):
+
+                saved_memory = memory
+                break
+
+        if not saved_memory:
+            raise RuntimeError(
+                "فشل حفظ memory الناتجة من AI"
+            )
+
+        if (
+            saved_memory["memory_value"]
+            != test_value_1
+        ):
+            raise RuntimeError(
+                "قيمة memory بعد الحفظ غير صحيحة"
+            )
+
+        if int(
+            saved_memory["importance"]
+        ) != 10:
+            raise RuntimeError(
+                "Importance بعد الحفظ غير صحيحة"
+            )
+
+        print(
+            "[MEMORY AI TEST] Save OK:",
+            saved_memory
+        )
+
+        # -------------------------------------------------
+        # 5. Update same memory key
+        # -------------------------------------------------
+
+        print(
+            "[MEMORY AI TEST] Updating same memory key..."
+        )
+
+        save_memory(
+            user_id,
+            test_category,
+            test_key,
+            test_value_2,
+            10
+        )
+
+        memories_after_update = get_memories(
+            user_id
+        )
+
+        updated_memory = None
+
+        for memory in memories_after_update:
+
+            if (
+                memory["category"] == test_category
+                and
+                memory["memory_key"] == test_key
+            ):
+
+                updated_memory = memory
+                break
+
+        if not updated_memory:
+            raise RuntimeError(
+                "فشل العثور على memory بعد التحديث"
+            )
+
+        if (
+            updated_memory["memory_value"]
+            != test_value_2
+        ):
+            raise RuntimeError(
+                "فشل تحديث memory"
+            )
+
+        if int(
+            updated_memory["importance"]
+        ) != 10:
+            raise RuntimeError(
+                "Importance بعد التحديث غير صحيحة"
+            )
+
+        print(
+            "[MEMORY AI TEST] Update OK:",
+            updated_memory
+        )
+
+        # -------------------------------------------------
+        # 6. Delete memory
+        # -------------------------------------------------
+
+        print(
+            "[MEMORY AI TEST] Deleting memory..."
+        )
+
+        delete_memory(
+            user_id,
+            test_category,
+            test_key
+        )
+
+        # -------------------------------------------------
+        # 7. Verify deletion
+        # -------------------------------------------------
+
+        memories_after_delete = get_memories(
+            user_id
+        )
+
+        deleted_memory = None
+
+        for memory in memories_after_delete:
+
+            if (
+                memory["category"] == test_category
+                and
+                memory["memory_key"] == test_key
+            ):
+
+                deleted_memory = memory
+                break
+
+        if deleted_memory:
+            raise RuntimeError(
+                "فشل حذف memory"
+            )
+
+        print(
+            "[MEMORY AI TEST] Delete OK"
+        )
+
+        print(
+            "[MEMORY AI TEST] ALL TESTS PASSED"
+        )
+
+        print(
+            "===================================="
+        )
+
+        return jsonify({
+            "status": "ok",
+            "message": "اختبار مسار الذاكرة AI نجح بالكامل",
+            "tests": {
+                "fake_ai_json": True,
+                "parser": True,
+                "memory_save": True,
+                "memory_read": True,
+                "memory_update": True,
+                "memory_delete": True
+            }
+        })
+
+    except Exception as e:
+
+        print(
+            "[MEMORY AI TEST] FAILED:",
+            str(e)
+        )
+
+        traceback.print_exc()
+
+        print(
+            "===================================="
+        )
+
+        return jsonify({
+            "status": "error",
+            "message": str(e)
+        }), 500
+
+
 @app.route(
     "/chat",
     methods=["POST"]
