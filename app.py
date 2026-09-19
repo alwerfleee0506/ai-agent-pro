@@ -32,26 +32,27 @@ ALLOWED_CATEGORIES = {
 # =========================================================
 # Gemini
 # =========================================================
+
 if not GEMINI_API_KEY:
     print("[STARTUP] WARNING: GEMINI_API_KEY غير موجود")
 
-# مهم:
-# محاولة واحدة فقط بدون Retry طويل
-# والـ HTTP timeout = 15 ثانية
+# محاولة واحدة فقط
+# HTTP timeout = 15 ثانية
+# لا نريد إعادة محاولة أخطاء Gemini
 client = genai.Client(
     api_key=GEMINI_API_KEY,
     http_options=types.HttpOptions(
         timeout=15000,
         retry_options=types.HttpRetryOptions(
-            attempts=1,
+            attempts=0,
             initial_delay=0,
             max_delay=0,
             jitter=0,
-            http_status_codes=[]
+            http_status_codes=[999]
         )
     )
 )
-    
+
 
 # =========================================================
 # System Prompt
@@ -277,11 +278,13 @@ important
 أنت PRO، وكيل محمود الشخصي.
 """
 
+
 # =========================================================
 # Database
 # =========================================================
 
 def get_db():
+
     if not DATABASE_URL:
         raise RuntimeError(
             "DATABASE_URL غير موجود في إعدادات Render"
@@ -299,16 +302,13 @@ def get_db():
 # =========================================================
 
 def migrate_old_users():
-    """
-    يوحد كل بيانات المستخدمين القديمة التي تم إنشاؤها
-    بواسطة المتصفحات المختلفة تحت هوية PRO_OWNER_ID.
-    """
 
     print("[MIGRATION] Checking old user IDs...")
 
     conn = get_db()
 
     try:
+
         cur = conn.cursor(
             cursor_factory=RealDictCursor
         )
@@ -343,6 +343,7 @@ def migrate_old_users():
         old_users = cur.fetchall()
 
         if not old_users:
+
             conn.commit()
 
             print(
@@ -513,6 +514,7 @@ def migrate_old_users():
         raise
 
     finally:
+
         conn.close()
 
 
@@ -602,11 +604,17 @@ def save_memory(
         return
 
     try:
+
         importance = int(importance)
+
     except Exception:
+
         importance = 5
 
-    importance = max(1, min(10, importance))
+    importance = max(
+        1,
+        min(10, importance)
+    )
 
     conn = get_db()
 
@@ -822,6 +830,7 @@ def parse_ai_response(text):
     )
 
     if not isinstance(reply, str):
+
         reply = str(reply)
 
     memories = data.get(
@@ -1083,7 +1092,6 @@ form.addEventListener(
             new AbortController();
 
 
-        // أقصى مدة للطلب من المتصفح.
         const timeoutId =
             setTimeout(
                 function() {
@@ -1461,12 +1469,76 @@ def chat():
 
         gemini_start = time.time()
 
+        try:
 
-        interaction = client.interactions.create(
-            model="gemini-3.6-flash",
-            input=prompt,
-            timeout=30
-        )
+            interaction = client.interactions.create(
+                model="gemini-3.6-flash",
+                input=prompt
+            )
+
+        except Exception as gemini_error:
+
+            gemini_time = (
+                time.time()
+                - gemini_start
+            )
+
+            error_text = str(
+                gemini_error
+            )
+
+            print(
+                "[GEMINI] ERROR after",
+                round(gemini_time, 2),
+                "seconds"
+            )
+
+            print(
+                "[GEMINI] ERROR TYPE:",
+                type(gemini_error).__name__
+            )
+
+            print(
+                "[GEMINI] ERROR:",
+                error_text
+            )
+
+            traceback.print_exc()
+
+            # -------------------------------------------------
+            # Gemini Rate Limit / Quota
+            # -------------------------------------------------
+
+            if (
+                "429" in error_text
+                or
+                "Too Many Requests" in error_text
+                or
+                "RESOURCE_EXHAUSTED" in error_text
+                or
+                "quota" in error_text.lower()
+            ):
+
+                print(
+                    "[GEMINI] RATE LIMIT / QUOTA"
+                )
+
+                return jsonify({
+                    "error":
+                        "Gemini غير متاح حالياً بسبب تجاوز حد الاستخدام. "
+                        "قاعدة بيانات وذاكرة PRO شغالات بشكل طبيعي. "
+                        "جرب بعد ما يتجدد الحد."
+                }), 429
+
+            # -------------------------------------------------
+            # Other Gemini errors
+            # -------------------------------------------------
+
+            return jsonify({
+                "error":
+                    "صار خطأ في الاتصال بـ Gemini: "
+                    + error_text
+            }), 502
 
 
         gemini_time = (
@@ -1831,5 +1903,3 @@ if __name__ == "__main__":
         host="0.0.0.0",
         port=port
     )
-
-
