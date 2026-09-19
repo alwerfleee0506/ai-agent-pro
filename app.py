@@ -12,22 +12,10 @@ import traceback
 app = Flask(__name__)
 
 # =========================================================
-# Gemini
+# Configuration
 # =========================================================
 
 GEMINI_API_KEY = os.environ.get("GEMINI_API_KEY")
-
-if not GEMINI_API_KEY:
-    print("[STARTUP] WARNING: GEMINI_API_KEY غير موجود")
-
-client = genai.Client(
-    api_key=GEMINI_API_KEY
-)
-
-# =========================================================
-# Database
-# =========================================================
-
 DATABASE_URL = os.environ.get("DATABASE_URL")
 
 ALLOWED_CATEGORIES = {
@@ -37,6 +25,16 @@ ALLOWED_CATEGORIES = {
     "important"
 }
 
+# =========================================================
+# Gemini
+# =========================================================
+
+if not GEMINI_API_KEY:
+    print("[STARTUP] WARNING: GEMINI_API_KEY غير موجود")
+
+client = genai.Client(
+    api_key=GEMINI_API_KEY
+)
 
 # =========================================================
 # System Prompt
@@ -159,13 +157,11 @@ important
 لا تخترع معلومات شخصية عن محمود.
 """
 
-
 # =========================================================
-# Database connection
+# Database
 # =========================================================
 
 def get_db():
-
     if not DATABASE_URL:
         raise RuntimeError(
             "DATABASE_URL غير موجود في إعدادات Render"
@@ -178,18 +174,12 @@ def get_db():
     )
 
 
-# =========================================================
-# Initialize database
-# =========================================================
-
 def init_db():
-
     print("[DB] بدء تهيئة قاعدة البيانات")
 
     conn = get_db()
 
     try:
-
         cur = conn.cursor()
 
         cur.execute("""
@@ -247,7 +237,7 @@ def init_db():
 
 
 # =========================================================
-# Memory functions
+# Memory Functions
 # =========================================================
 
 def save_memory(
@@ -257,7 +247,6 @@ def save_memory(
     memory_value,
     importance=5
 ):
-
     if category not in ALLOWED_CATEGORIES:
         return
 
@@ -274,7 +263,6 @@ def save_memory(
     conn = get_db()
 
     try:
-
         cur = conn.cursor()
 
         cur.execute(
@@ -320,11 +308,9 @@ def delete_memory(
     category,
     memory_key
 ):
-
     conn = get_db()
 
     try:
-
         cur = conn.cursor()
 
         cur.execute(
@@ -348,11 +334,9 @@ def delete_memory(
 
 
 def get_memories(user_id):
-
     conn = get_db()
 
     try:
-
         cur = conn.cursor(
             cursor_factory=RealDictCursor
         )
@@ -364,15 +348,11 @@ def get_memories(user_id):
                 memory_key,
                 memory_value,
                 importance
-
             FROM pro_memory
-
             WHERE user_id = %s
-
             ORDER BY
                 importance DESC,
                 updated_at DESC
-
             LIMIT 50
             """,
             (user_id,)
@@ -385,14 +365,12 @@ def get_memories(user_id):
 
 
 def format_memories(memories):
-
     if not memories:
         return "لا توجد معلومات محفوظة."
 
     result = []
 
     for memory in memories:
-
         result.append(
             "- [{}] {}: {}".format(
                 memory["category"],
@@ -405,13 +383,11 @@ def format_memories(memories):
 
 
 # =========================================================
-# AI response parser
+# AI Response Parser
 # =========================================================
 
 def parse_ai_response(text):
-
     if not text:
-
         return {
             "reply": "ما قدرتش نطلع رد.",
             "memories": [],
@@ -440,32 +416,24 @@ def parse_ai_response(text):
     )
 
     try:
-
         data = json.loads(cleaned)
 
     except Exception:
-
         start = cleaned.find("{")
         end = cleaned.rfind("}")
 
         if start != -1 and end > start:
-
             try:
-
                 data = json.loads(
                     cleaned[start:end + 1]
                 )
-
             except Exception:
-
                 return {
                     "reply": text,
                     "memories": [],
                     "forget": []
                 }
-
         else:
-
             return {
                 "reply": text,
                 "memories": [],
@@ -473,7 +441,6 @@ def parse_ai_response(text):
             }
 
     if not isinstance(data, dict):
-
         return {
             "reply": text,
             "memories": [],
@@ -502,7 +469,7 @@ def parse_ai_response(text):
 
 
 # =========================================================
-# HTML
+# HTML / JavaScript
 # =========================================================
 
 HTML = r"""
@@ -519,6 +486,10 @@ content="width=device-width, initial-scale=1.0">
 <title>PRO AI Agent</title>
 
 <style>
+
+* {
+    box-sizing: border-box;
+}
 
 body {
     font-family: Arial, sans-serif;
@@ -539,6 +510,7 @@ h1 {
 
 #chat {
     height: 60vh;
+    min-height: 300px;
     overflow-y: auto;
     padding: 15px;
     background: #1c1c1c;
@@ -569,6 +541,7 @@ form {
 
 input {
     flex: 1;
+    min-width: 0;
     padding: 14px;
     border-radius: 10px;
     border: none;
@@ -579,10 +552,20 @@ button {
     padding: 14px 20px;
     border: none;
     border-radius: 10px;
+    cursor: pointer;
+    font-size: 16px;
 }
 
-button:disabled {
-    opacity: 0.5;
+button:disabled,
+input:disabled {
+    opacity: 0.6;
+}
+
+.status {
+    text-align: center;
+    font-size: 13px;
+    color: #aaa;
+    margin-top: 8px;
 }
 
 </style>
@@ -622,41 +605,104 @@ type="submit"
 
 </form>
 
+<div id="status" class="status"></div>
+
 </div>
 
 <script>
 
-const form =
-    document.getElementById("form");
+"use strict";
 
-const input =
-    document.getElementById("message");
-
-const chat =
-    document.getElementById("chat");
-
-const sendButton =
-    document.getElementById("sendButton");
+const form = document.getElementById("form");
+const input = document.getElementById("message");
+const chat = document.getElementById("chat");
+const sendButton = document.getElementById("sendButton");
+const statusElement = document.getElementById("status");
 
 
-let userId =
-    localStorage.getItem("pro_ai_user_id");
+// =========================================================
+// User ID
+// =========================================================
 
+let userId = null;
+
+try {
+    userId = localStorage.getItem("pro_ai_user_id");
+} catch (error) {
+    console.warn("localStorage unavailable:", error);
+}
 
 if (!userId) {
 
-    userId =
-        crypto.randomUUID();
+    if (
+        window.crypto &&
+        typeof window.crypto.randomUUID === "function"
+    ) {
+        userId = window.crypto.randomUUID();
+    } else {
+        userId =
+            "pro-" +
+            Date.now() +
+            "-" +
+            Math.random()
+                .toString(36)
+                .substring(2, 12);
+    }
 
-    localStorage.setItem(
-        "pro_ai_user_id",
-        userId
-    );
+    try {
+        localStorage.setItem(
+            "pro_ai_user_id",
+            userId
+        );
+    } catch (error) {
+        console.warn(
+            "Could not save user ID:",
+            error
+        );
+    }
 }
 
 
+// =========================================================
+// Helpers
+// =========================================================
+
 let requestRunning = false;
 
+function escapeHtml(text) {
+
+    const div = document.createElement("div");
+
+    div.textContent = text;
+
+    return div.innerHTML;
+}
+
+
+function scrollChat() {
+    chat.scrollTop = chat.scrollHeight;
+}
+
+
+function setBusy(busy) {
+
+    requestRunning = busy;
+
+    sendButton.disabled = busy;
+    input.disabled = busy;
+
+    if (busy) {
+        statusElement.textContent =
+            "PRO يعالج الرسالة...";
+    } else {
+        statusElement.textContent = "";
+    }
+}
+
+
+// =========================================================
+// Submit
+// =========================================================
 
 form.addEventListener(
     "submit",
@@ -668,17 +714,14 @@ form.addEventListener(
             return;
         }
 
-        const message =
-            input.value.trim();
+        const message = input.value.trim();
 
         if (!message) {
+            input.focus();
             return;
         }
 
-        requestRunning = true;
-
-        sendButton.disabled = true;
-        input.disabled = true;
+        setBusy(true);
 
         chat.innerHTML +=
             '<div class="message user">' +
@@ -690,29 +733,26 @@ form.addEventListener(
         const loading =
             document.createElement("div");
 
-        loading.className =
-            "message ai";
+        loading.className = "message ai";
+        loading.textContent = "جاري التفكير...";
 
-        loading.textContent =
-            "جاري التفكير...";
+        chat.appendChild(loading);
 
-        chat.appendChild(
-            loading
-        );
-
-        chat.scrollTop =
-            chat.scrollHeight;
+        scrollChat();
 
 
         const controller =
             new AbortController();
 
-        const timeout =
+
+        // أقصى مدة للطلب من المتصفح.
+        // أطول قليلاً من مهلة Gemini.
+        const timeoutId =
             setTimeout(
                 function() {
                     controller.abort();
                 },
-                60000
+                55000
             );
 
 
@@ -726,41 +766,37 @@ form.addEventListener(
 
                         headers: {
                             "Content-Type":
+                                "application/json",
+
+                            "Accept":
                                 "application/json"
                         },
 
                         body: JSON.stringify({
-                            message:
-                                message,
-
-                            user_id:
-                                userId
+                            message: message,
+                            user_id: userId
                         }),
 
-                        signal:
-                            controller.signal
+                        signal: controller.signal
                     }
                 );
-
-
-            clearTimeout(timeout);
 
 
             const text =
                 await response.text();
 
 
-            let data;
+            let data = null;
+
 
             try {
 
-                data =
-                    JSON.parse(text);
+                data = JSON.parse(text);
 
             } catch (jsonError) {
 
                 console.error(
-                    "Invalid JSON:",
+                    "Invalid JSON from server:",
                     text
                 );
 
@@ -774,21 +810,18 @@ form.addEventListener(
 
                 loading.textContent =
                     data.error ||
-                    "حدث خطأ في الخادم.";
+                    "حدث خطأ داخل الخادم.";
 
             } else {
 
                 loading.textContent =
                     data.reply ||
-                    data.error ||
-                    "صار خطأ.";
+                    "PRO ما رجعش رد.";
 
             }
 
 
         } catch (error) {
-
-            clearTimeout(timeout);
 
             console.error(
                 "CHAT ERROR:",
@@ -797,46 +830,62 @@ form.addEventListener(
 
 
             if (
-                error.name ===
-                "AbortError"
+                error &&
+                error.name === "AbortError"
             ) {
 
                 loading.textContent =
-                    "الطلب أخذ وقت طويل. جرب مرة ثانية.";
+                    "الطلب أخذ وقت طويل. Render أو Gemini تأخروا. جرب مرة ثانية.";
 
             } else {
 
                 loading.textContent =
-                    "تعذر الاتصال بالوكيل.";
+                    "تعذر الاتصال بالوكيل.\n" +
+                    "افتح Logs في Render لمعرفة الخطأ.";
 
             }
 
+        } finally {
+
+            clearTimeout(timeoutId);
+
+            // مهم جداً:
+            // الزر يرجع يشتغل مهما صار.
+            setBusy(false);
+
+            input.focus();
+
+            scrollChat();
         }
-
-
-        requestRunning = false;
-
-        sendButton.disabled = false;
-        input.disabled = false;
-
-        input.focus();
-
-        chat.scrollTop =
-            chat.scrollHeight;
 
     }
 );
 
 
-function escapeHtml(text) {
+// =========================================================
+// Enter / Focus
+// =========================================================
 
-    const div =
-        document.createElement("div");
+input.addEventListener(
+    "keydown",
+    function(e) {
 
-    div.textContent = text;
+        if (
+            e.key === "Enter" &&
+            !e.shiftKey
+        ) {
+            e.preventDefault();
 
-    return div.innerHTML;
-}
+            if (!requestRunning) {
+                form.requestSubmit();
+            }
+        }
+
+    }
+);
+
+
+input.focus();
 
 </script>
 
@@ -852,10 +901,7 @@ function escapeHtml(text) {
 
 @app.route("/")
 def home():
-
-    return render_template_string(
-        HTML
-    )
+    return render_template_string(HTML)
 
 
 @app.route(
@@ -863,7 +909,6 @@ def home():
     methods=["GET"]
 )
 def health():
-
     return jsonify({
         "status": "ok",
         "service": "PRO AI Agent"
@@ -903,10 +948,7 @@ def chat():
         ).strip()
 
         if not user_id:
-
-            user_id = str(
-                uuid.uuid4()
-            )
+            user_id = str(uuid.uuid4())
 
         if not message:
 
@@ -915,8 +957,7 @@ def chat():
             )
 
             return jsonify({
-                "error":
-                    "اكتب رسالة أولاً"
+                "error": "اكتب رسالة أولاً"
             }), 400
 
 
@@ -935,88 +976,78 @@ def chat():
         # Database - user + message
         # -------------------------------------------------
 
-        print(
-            "[DB] Connecting..."
-        )
+        print("[DB] Connecting...")
 
         conn = get_db()
 
-        print(
-            "[DB] Connected"
-        )
+        print("[DB] Connected")
 
-        cur = conn.cursor(
-            cursor_factory=RealDictCursor
-        )
+        try:
 
-
-        cur.execute(
-            """
-            INSERT INTO pro_users (user_id)
-            VALUES (%s)
-
-            ON CONFLICT (user_id)
-            DO NOTHING
-            """,
-            (user_id,)
-        )
-
-
-        cur.execute(
-            """
-            INSERT INTO pro_messages
-            (
-                user_id,
-                role,
-                message
+            cur = conn.cursor(
+                cursor_factory=RealDictCursor
             )
-            VALUES (%s, %s, %s)
-            """,
-            (
-                user_id,
-                "user",
-                message
+
+            cur.execute(
+                """
+                INSERT INTO pro_users (user_id)
+                VALUES (%s)
+
+                ON CONFLICT (user_id)
+                DO NOTHING
+                """,
+                (user_id,)
             )
-        )
 
-
-        conn.commit()
-
-        print(
-            "[DB] User message saved"
-        )
-
-
-        # -------------------------------------------------
-        # Conversation history
-        # -------------------------------------------------
-
-        cur.execute(
-            """
-            SELECT
-                role,
-                message
-
-            FROM pro_messages
-
-            WHERE user_id = %s
-
-            ORDER BY id DESC
-
-            LIMIT 20
-            """,
-            (user_id,)
-        )
-
-
-        rows = list(
-            reversed(
-                cur.fetchall()
+            cur.execute(
+                """
+                INSERT INTO pro_messages
+                (
+                    user_id,
+                    role,
+                    message
+                )
+                VALUES (%s, %s, %s)
+                """,
+                (
+                    user_id,
+                    "user",
+                    message
+                )
             )
-        )
 
+            conn.commit()
 
-        conn.close()
+            print(
+                "[DB] User message saved"
+            )
+
+            # -------------------------------------------------
+            # Conversation history
+            # -------------------------------------------------
+
+            cur.execute(
+                """
+                SELECT
+                    role,
+                    message
+                FROM pro_messages
+                WHERE user_id = %s
+                ORDER BY id DESC
+                LIMIT 20
+                """,
+                (user_id,)
+            )
+
+            rows = list(
+                reversed(
+                    cur.fetchall()
+                )
+            )
+
+        finally:
+            conn.close()
+
 
         print(
             "[DB] Conversation loaded:",
@@ -1029,19 +1060,13 @@ def chat():
         # Memories
         # -------------------------------------------------
 
-        print(
-            "[MEMORY] Loading..."
+        print("[MEMORY] Loading...")
+
+        memories = get_memories(user_id)
+
+        memory_text = format_memories(
+            memories
         )
-
-        memories =
-            get_memories(
-                user_id
-            )
-
-        memory_text =
-            format_memories(
-                memories
-            )
 
         print(
             "[MEMORY] Loaded:",
@@ -1085,25 +1110,22 @@ def chat():
         # Gemini
         # -------------------------------------------------
 
-        print(
-            "[GEMINI] Calling Gemini..."
+        print("[GEMINI] Calling Gemini...")
+
+        gemini_start = time.time()
+
+
+        interaction = client.interactions.create(
+            model="gemini-3.6-flash",
+            input=prompt,
+            timeout=45
         )
 
-        gemini_start =
+
+        gemini_time = (
             time.time()
-
-
-        interaction =
-            client.interactions.create(
-                model="gemini-3.6-flash",
-                input=prompt,
-                timeout=45
-            )
-
-
-        gemini_time =
-            time.time() -
-            gemini_start
+            - gemini_start
+        )
 
 
         print(
@@ -1113,12 +1135,10 @@ def chat():
         )
 
 
-        raw_output =
-            interaction.output_text
+        raw_output = interaction.output_text
 
 
         if not raw_output:
-
             raise RuntimeError(
                 "Gemini رجع استجابة بدون نص"
             )
@@ -1134,20 +1154,15 @@ def chat():
         # Parse AI response
         # -------------------------------------------------
 
-        result =
-            parse_ai_response(
-                raw_output
-            )
+        result = parse_ai_response(
+            raw_output
+        )
 
-
-        reply =
-            result["reply"]
+        reply = result["reply"]
 
 
         if not reply:
-
-            reply =
-                "تمام يا محمود."
+            reply = "تمام يا محمود."
 
 
         # -------------------------------------------------
@@ -1168,42 +1183,49 @@ def chat():
                 continue
 
 
-            category =
-                str(
-                    memory.get(
-                        "category",
-                        ""
-                    )
-                ).strip().lower()
-
-
-            memory_key =
-                str(
-                    memory.get(
-                        "memory_key",
-                        ""
-                    )
-                ).strip()
-
-
-            memory_value =
-                str(
-                    memory.get(
-                        "memory_value",
-                        ""
-                    )
-                ).strip()
-
-
-            importance =
+            category = str(
                 memory.get(
-                    "importance",
-                    5
+                    "category",
+                    ""
                 )
+            ).strip().lower()
+
+
+            memory_key = str(
+                memory.get(
+                    "memory_key",
+                    ""
+                )
+            ).strip()
+
+
+            memory_value = str(
+                memory.get(
+                    "memory_value",
+                    ""
+                )
+            ).strip()
+
+
+            importance = memory.get(
+                "importance",
+                5
+            )
 
 
             if category not in ALLOWED_CATEGORIES:
                 continue
+
+
+            if not memory_key or not memory_value:
+                continue
+
+
+            print(
+                "[MEMORY] Saving:",
+                category,
+                memory_key
+            )
 
 
             save_memory(
@@ -1233,22 +1255,20 @@ def chat():
                 continue
 
 
-            category =
-                str(
-                    memory.get(
-                        "category",
-                        ""
-                    )
-                ).strip().lower()
+            category = str(
+                memory.get(
+                    "category",
+                    ""
+                )
+            ).strip().lower()
 
 
-            memory_key =
-                str(
-                    memory.get(
-                        "memory_key",
-                        ""
-                    )
-                ).strip()
+            memory_key = str(
+                memory.get(
+                    "memory_key",
+                    ""
+                )
+            ).strip()
 
 
             if category not in ALLOWED_CATEGORIES:
@@ -1257,6 +1277,13 @@ def chat():
 
             if not memory_key:
                 continue
+
+
+            print(
+                "[MEMORY] Forget:",
+                category,
+                memory_key
+            )
 
 
             delete_memory(
@@ -1277,30 +1304,31 @@ def chat():
 
         conn = get_db()
 
-        cur = conn.cursor()
+        try:
 
+            cur = conn.cursor()
 
-        cur.execute(
-            """
-            INSERT INTO pro_messages
-            (
-                user_id,
-                role,
-                message
+            cur.execute(
+                """
+                INSERT INTO pro_messages
+                (
+                    user_id,
+                    role,
+                    message
+                )
+                VALUES (%s, %s, %s)
+                """,
+                (
+                    user_id,
+                    "assistant",
+                    reply
+                )
             )
-            VALUES (%s, %s, %s)
-            """,
-            (
-                user_id,
-                "assistant",
-                reply
-            )
-        )
 
+            conn.commit()
 
-        conn.commit()
-
-        conn.close()
+        finally:
+            conn.close()
 
 
         # -------------------------------------------------
@@ -1316,9 +1344,14 @@ def chat():
         )
 
 
-        total_time =
-            time.time() -
-            request_start
+        # -------------------------------------------------
+        # Done
+        # -------------------------------------------------
+
+        total_time = (
+            time.time()
+            - request_start
+        )
 
 
         print(
@@ -1340,9 +1373,10 @@ def chat():
 
     except Exception as e:
 
-        elapsed =
-            time.time() -
-            request_start
+        elapsed = (
+            time.time()
+            - request_start
+        )
 
 
         print("")
@@ -1380,39 +1414,40 @@ def chat():
 # Startup
 # =========================================================
 
+print("")
+print("====================================")
+print("PRO AI Agent starting...")
+print("====================================")
+
+
+# مهم مع Gunicorn:
+# هذا يتم تنفيذه عند import app.py
+# بعكس if __name__ == "__main__"
+try:
+
+    init_db()
+
+except Exception as e:
+
+    print(
+        "[STARTUP] Database initialization failed:"
+    )
+
+    print(
+        str(e)
+    )
+
+    traceback.print_exc()
+
+
 if __name__ == "__main__":
 
-    print("")
-    print("====================================")
-    print("PRO AI Agent starting...")
-    print("====================================")
-
-
-    try:
-
-        init_db()
-
-    except Exception as e:
-
-        print(
-            "[STARTUP] Database initialization failed:"
+    port = int(
+        os.environ.get(
+            "PORT",
+            10000
         )
-
-        print(
-            str(e)
-        )
-
-        traceback.print_exc()
-
-
-    port =
-        int(
-            os.environ.get(
-                "PORT",
-                10000
-            )
-        )
-
+    )
 
     app.run(
         host="0.0.0.0",
