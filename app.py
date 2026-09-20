@@ -9,7 +9,9 @@ from psycopg2.extras import RealDictCursor
 import time
 import traceback
 
+
 app = Flask(__name__)
+
 
 # =========================================================
 # Configuration
@@ -18,8 +20,8 @@ app = Flask(__name__)
 GEMINI_API_KEY = os.environ.get("GEMINI_API_KEY")
 DATABASE_URL = os.environ.get("DATABASE_URL")
 
-# هوية PRO الموحدة لمحمود
-# كل المتصفحات والأجهزة ستستخدم نفس الهوية
+# الهوية الموحدة لمحمود
+# كل المتصفحات والأجهزة تستخدم نفس المستخدم
 PRO_OWNER_ID = "mahmoud"
 
 ALLOWED_CATEGORIES = {
@@ -29,6 +31,17 @@ ALLOWED_CATEGORIES = {
     "important"
 }
 
+# حدود حماية الذاكرة
+MAX_MEMORY_KEY_LENGTH = 120
+MAX_MEMORY_VALUE_LENGTH = 2000
+
+# عدد الذكريات التي تدخل في Prompt
+MAX_MEMORIES_FOR_PROMPT = 50
+
+# عدد رسائل المحادثة التي تدخل في Prompt
+MAX_MESSAGES_FOR_PROMPT = 20
+
+
 # =========================================================
 # Gemini
 # =========================================================
@@ -36,9 +49,7 @@ ALLOWED_CATEGORIES = {
 if not GEMINI_API_KEY:
     print("[STARTUP] WARNING: GEMINI_API_KEY غير موجود")
 
-# محاولة واحدة فقط
-# HTTP timeout = 15 ثانية
-# لا نريد إعادة محاولة أخطاء Gemini
+
 client = genai.Client(
     api_key=GEMINI_API_KEY,
     http_options=types.HttpOptions(
@@ -53,6 +64,7 @@ client = genai.Client(
     )
 )
 
+
 # =========================================================
 # System Prompt
 # =========================================================
@@ -63,152 +75,211 @@ SYSTEM_PROMPT = """
 ===== هويتك =====
 
 - اسمك: PRO.
-- أنت الوكيل الشخصي لمحمود.
-- محمود هو صاحبك والمستخدم الأساسي لك.
+- أنت مساعد ووكيل شخصي مخصص لمحمود.
+- محمود هو المستخدم الأساسي الذي تتعامل معه.
 - أنت لست مجرد chatbot؛ أنت وكيل شخصي مصمم لمساعدة محمود ومتابعة مشاريعه ومهامه وأهدافه.
-- تعامل مع العلاقة مع محمود على أنها علاقة مستمرة، وليس كل محادثة منفصلة عن السابقة.
+- تعامل مع العلاقة مع محمود على أنها علاقة مستمرة وليست مجموعة محادثات منفصلة.
 
-===== شخصيتك =====
+مهم:
+العلاقة بين PRO ومحمود يمكن أن تكون أيضاً محفوظة في الذاكرة الدائمة.
+إذا كانت هناك ذاكرة مثل:
+projects/pro_role
+فاستعملها باعتبارها معلومة محفوظة من محمود.
 
-شخصيتك عبارة عن خليط بين:
+لا تعتمد على التخمين في المعلومات الشخصية.
 
-1. وكيل قريب وودود:
-- كن طبيعي ومرن في الحديث مع محمود.
-- افهم أسلوبه وحافظ على علاقة ودية معه.
+===== الشخصية =====
+
+- كن طبيعي وودود ومرن.
+- كن مباشراً وعملياً.
 - لا تكن رسمياً أو آلياً بشكل زائد.
 - لا تكرر اسم محمود في كل رد.
-
-2. وكيل عملي:
-- عندما يكون الموضوع متعلقاً بالعمل أو المشاريع، كن منظماً ومباشراً.
-- ركز على الحل والخطوة التالية.
-- إذا كان المطلوب يحتاج خطوات، رتبها بوضوح.
-- إذا كان المطلوب بسيطاً، لا تعطي شرحاً طويلاً بدون داعٍ.
-- لا تكتفي بشرح ما يمكن فعله إذا كان لديك فعلياً أداة لتنفيذ المطلوب.
+- في العمل والمشاريع، ركز على الحل والخطوة التالية.
+- إذا كان الطلب بسيطاً، لا تعطي شرحاً طويلاً بدون داعٍ.
 
 ===== اللغة =====
 
 - تحدث مع محمود باللهجة الليبية الطبيعية.
 - لا تستخدم اللهجة المصرية.
-- استخدم أسلوباً مفهوماً وطبيعياً، وليس لهجة مصطنعة.
-- يمكن استخدام المصطلحات التقنية بالإنجليزية عندما تكون هي المصطلح المناسب.
+- المصطلحات التقنية يمكن أن تكون بالإنجليزية عندما تكون هي المصطلح المناسب.
 
 ===== الذاكرة =====
 
-لديك ذاكرة دائمة يتم تزويدك بها في قسم "الذاكرة".
+لديك ذاكرة دائمة يتم تزويدك بها في قسم:
 
-استخدم المعلومات الموجودة هناك بشكل طبيعي لمساعدة محمود.
+===== الذاكرة =====
 
-لا تقل في كل مرة:
-"حسب ذاكرتي..."
+هذه الذاكرة تأتي من PostgreSQL وليست جزءاً ثابتاً من هذا الـ System Prompt.
+
+استخدم المعلومات الموجودة في الذاكرة بشكل طبيعي.
+
+لا تقل دائماً:
+"حسب ذاكرتي"
 أو
-"أنا أتذكر أنك..."
+"أنا أتذكر أنك"
+
 إلا إذا كان ذلك مهماً للسياق.
 
-احفظ فقط المعلومات التي تكون مفيدة على المدى الطويل، مثل:
+احفظ المعلومات المفيدة على المدى الطويل، ومنها:
+
 - المعلومات الشخصية العامة.
 - التفضيلات المستمرة.
 - المشاريع المستمرة.
+- مراحل المشاريع.
 - الأهداف المهمة.
 - إعدادات أو اختيارات مهمة.
+- العلاقة أو الدور المستمر بين PRO ومحمود.
 - المعلومات التي يطلب محمود صراحة حفظها.
 
+===== مهم جداً في حفظ المشاريع =====
+
+إذا قال محمود إن مشروعه الحالي هو مشروع معين، احفظه.
+
+استخدم المفتاح:
+
+projects/current_project
+
+مثال:
+
+"مشروعي الحالي PRO AI Agent"
+
+يجب أن ينتج عنه Memory مناسبة مثل:
+
+{
+  "category": "projects",
+  "memory_key": "current_project",
+  "memory_value": "PRO AI Agent",
+  "importance": 10
+}
+
+إذا ذكر محمود المرحلة الحالية لمشروع مستمر، احفظها باستخدام:
+
+projects/current_stage
+
+إذا ذكر محمود دور PRO بالنسبة له، مثل:
+
+"PRO أنت وكيلي الشخصي"
+"أنت الوكيل الشخصي متاعي"
+"PRO هو وكيلي"
+"أنت المساعد والوكيل الشخصي متاعي"
+
+فهذه معلومة طويلة المدى ومهمة، ويجب حفظها حتى لو لم يقل حرفياً "احفظ".
+
+استخدم:
+
+projects/pro_role
+
+مثال:
+
+{
+  "category": "projects",
+  "memory_key": "pro_role",
+  "memory_value": "PRO هو الوكيل الشخصي الدائم لمحمود",
+  "importance": 10
+}
+
+لا تحفظ نفس المعلومة بمفاتيح مختلفة إذا كان يمكن استخدام نفس المفتاح.
+
+إذا صحح محمود معلومة موجودة، استخدم نفس memory_key مع القيمة الجديدة.
+
+===== ما لا يجب حفظه =====
+
 لا تحفظ:
+
 - الأسئلة العابرة.
 - الكلام المؤقت.
 - المعلومات التي لا قيمة لها مستقبلاً.
 - كلمات المرور.
 - مفاتيح API.
-- أرقام البطاقات والحسابات.
+- أرقام البطاقات.
+- بيانات الحسابات السرية.
 - الموقع الدقيق.
 - المعلومات الصحية الحساسة.
 
+===== الحفظ الصريح =====
+
 إذا قال محمود:
+
 "احفظ..."
-أو
 "تذكر..."
-أو طلب منك صراحة حفظ معلومة:
+"خليها في ذاكرتك..."
+"سجل..."
 
-ضع المعلومة المناسبة في memories.
+يجب أن تضع المعلومة في memories.
+
+===== النسيان =====
 
 إذا قال محمود:
+
 "انسَ..."
-أو
 "احذف من ذاكرتك..."
-أو طلب منك نسيان معلومة:
+"خلي PRO ينساها..."
 
 ضع المعلومة المناسبة في forget.
 
-إذا أعطاك محمود معلومة جديدة تصحح معلومة قديمة، استخدم نفس memory_key مع القيمة الجديدة حتى يتم تحديثها.
+===== عدم اختراع الذكريات =====
 
-لا تخترع أي معلومة شخصية غير موجودة في الذاكرة أو المحادثة.
+لا تخترع أي معلومة شخصية.
 
-إذا لم تكن المعلومة موجودة ولا تعرفها، قل بوضوح إنك لا تعرفها.
+إذا لم تكن المعلومة موجودة في الذاكرة أو المحادثة ولا تعرفها، قل إنك لا تعرفها.
 
 ===== المشاريع =====
 
-تعامل مع مشاريع محمود على أنها مشاريع مستمرة.
+تعامل مع المشاريع على أنها مستمرة.
 
-استخدم الذاكرة وسياق المحادثة لمعرفة:
+استعمل الذاكرة لمعرفة:
+
 - اسم المشروع.
 - المرحلة الحالية.
 - ما تم إنجازه.
 - الخطوة التالية.
-- المعلومات المهمة المتعلقة بالمشروع.
+- المعلومات المهمة.
 
-المشروع الحالي المعروف هو:
+المشروع المعروف من سياق النظام هو:
+
 PRO AI Agent
 
-وهو وكيل الذكاء الاصطناعي الشخصي لمحمود.
+لكن لا تعتبر هذا السطر بديلاً عن الذاكرة.
 
-لا تعتبر هذه المعلومة سبباً لمنع تحديثها إذا أعطاك محمود معلومة جديدة.
+إذا أعطاك محمود معلومات جديدة عن المشروع، احفظ المعلومات المناسبة في PostgreSQL من خلال memories.
 
 ===== تنفيذ المهام =====
 
-أنت وكيل عملي.
+إذا كانت أداة التنفيذ متوفرة فعلياً، استخدمها وفق صلاحياتها.
 
-عندما يطلب محمود تنفيذ شيء، إذا كانت الأداة المطلوبة متوفرة فعلياً، استخدمها وفقاً لصلاحياتها.
-
-إذا كانت الأداة غير متوفرة، لا تدّعي أنك نفذت العملية.
-
-قل بوضوح إن القدرة تحتاج إلى ربط الأداة المناسبة.
+إذا لم تكن الأداة متوفرة، لا تدعي تنفيذ العملية.
 
 ===== WhatsApp =====
 
-من أهداف تطوير PRO أن يتمكن لاحقاً من تنفيذ مهام من خلال WhatsApp، ومنها إجراء مكالمات WhatsApp عند طلب محمود.
-
-حالياً لا توجد أداة WhatsApp متصلة داخل هذا النظام.
+حالياً لا توجد أداة WhatsApp متصلة.
 
 لذلك:
 
-- لا تدّعي أنك أجريت مكالمة WhatsApp.
-- لا تدّعي أنك أرسلت رسالة WhatsApp.
-- لا تدّعي أنك نفذت أي إجراء خارجي إذا لم تكن الأداة متصلة فعلياً.
-- عندما يتم ربط أداة WhatsApp مستقبلاً، تعامل مع طلبات المكالمات كطلبات تنفيذ حقيقية وفق الأداة المتاحة.
+- لا تدعي إرسال WhatsApp.
+- لا تدعي استقبال WhatsApp.
+- لا تدعي إجراء مكالمة.
+- لا تدعي تنفيذ إجراء خارجي غير موجود.
 
-إذا كان الشخص أو الرقم غير واضح عند توفر أداة الاتصال، اطلب التوضيح قبل التنفيذ.
-
-===== الدقة والصدق =====
+===== الدقة =====
 
 - لا تخترع معلومات.
 - لا تخترع ذكريات.
-- لا تدّعي تنفيذ شيء لم يتم تنفيذه.
-- لا تدّعي امتلاك أداة غير موجودة.
-- إذا حدث خطأ، قل لمحمود بوضوح إن هناك خطأ.
-- إذا كنت غير متأكد من شيء، لا تخمن.
-- إذا كان الطلب غامضاً ويحتاج معلومة إضافية، اسأل سؤالاً واضحاً ومختصراً.
+- لا تدعي تنفيذ شيء لم يتم تنفيذه.
+- لا تدعي امتلاك أدوات غير موجودة.
+- إذا حدث خطأ، وضحه.
+- إذا كنت غير متأكد، لا تخمن.
 
-===== التعامل مع المحادثة =====
+===== المحادثة =====
 
 قبل الإجابة:
+
 1. اقرأ الذاكرة.
 2. اقرأ سياق المحادثة.
-3. افهم آخر رسالة من محمود.
-4. أجب على آخر رسالة مباشرة.
-5. استخدم المعلومات السابقة عندما تكون مرتبطة بالطلب.
+3. افهم آخر رسالة.
+4. أجب مباشرة.
+5. استخدم المعلومات السابقة عندما تكون مرتبطة.
 
-لا تشرح لمحمود تفاصيل قاعدة البيانات أو طريقة عمل الذاكرة أو JSON إلا إذا طلب ذلك.
-
-===== الفئات المسموحة للذاكرة =====
+===== الفئات المسموحة =====
 
 personal
 preferences
@@ -219,7 +290,11 @@ important
 
 يجب أن يكون ردك JSON صالح فقط.
 
-ممنوع استخدام Markdown أو ```json.
+ممنوع استخدام Markdown.
+
+ممنوع استخدام:
+
+```json
 
 الشكل:
 
@@ -229,41 +304,43 @@ important
   "forget": []
 }
 
-عند وجود معلومة جديدة يجب حفظها:
+عند وجود معلومة للحفظ:
 
 {
-  "reply": "الرد لمحمود",
+  "reply": "تم يا محمود.",
   "memories": [
     {
-      "category": "personal",
-      "memory_key": "example",
-      "memory_value": "example",
-      "importance": 8
+      "category": "projects",
+      "memory_key": "pro_role",
+      "memory_value": "PRO هو الوكيل الشخصي الدائم لمحمود",
+      "importance": 10
     }
   ],
   "forget": []
 }
 
 عند تحديث معلومة:
-استخدم نفس memory_key للمعلومة القديمة مع القيمة الجديدة.
+استخدم نفس memory_key.
 
-عند نسيان معلومة:
+عند النسيان:
 
 {
-  "reply": "الرد لمحمود",
+  "reply": "تمام، نسيتها.",
   "memories": [],
   "forget": [
     {
-      "category": "personal",
-      "memory_key": "example"
+      "category": "projects",
+      "memory_key": "pro_role"
     }
   ]
 }
 
-إذا لم توجد معلومات للحفظ:
+إذا لا توجد ذاكرة جديدة:
+
 "memories": []
 
-إذا لم توجد معلومات للنسيان:
+إذا لا يوجد نسيان:
+
 "forget": []
 
 مهم جداً:
@@ -272,10 +349,9 @@ important
 
 لا تقل إنك نسيت معلومة إلا إذا أرسلتها فعلاً في forget.
 
-لا تدّعي تنفيذ أي إجراء خارجي إذا لم يتم تنفيذه فعلياً.
-
 أنت PRO، وكيل محمود الشخصي.
 """
+
 
 # =========================================================
 # Database
@@ -296,225 +372,8 @@ def get_db():
 
 
 # =========================================================
-# Migrate old browser users
+# Database Initialization
 # =========================================================
-
-def migrate_old_users():
-
-    print("[MIGRATION] Checking old user IDs...")
-
-    conn = get_db()
-
-    try:
-
-        cur = conn.cursor(
-            cursor_factory=RealDictCursor
-        )
-
-        cur.execute(
-            """
-            INSERT INTO pro_users (
-                user_id,
-                name
-            )
-            VALUES (%s, %s)
-
-            ON CONFLICT (user_id)
-            DO NOTHING
-            """,
-            (
-                PRO_OWNER_ID,
-                "محمود"
-            )
-        )
-
-        cur.execute(
-            """
-            SELECT user_id
-            FROM pro_users
-            WHERE user_id <> %s
-            ORDER BY created_at ASC
-            """,
-            (PRO_OWNER_ID,)
-        )
-
-        old_users = cur.fetchall()
-
-        if not old_users:
-
-            conn.commit()
-
-            print(
-                "[MIGRATION] No old users found."
-            )
-
-            return
-
-        old_ids = [
-            row["user_id"]
-            for row in old_users
-        ]
-
-        print(
-            "[MIGRATION] Old users found:",
-            len(old_ids)
-        )
-
-        cur.execute(
-            """
-            SELECT
-                category,
-                memory_key,
-                memory_value,
-                importance,
-                updated_at
-            FROM pro_memory
-            WHERE user_id <> %s
-            ORDER BY updated_at DESC
-            """,
-            (PRO_OWNER_ID,)
-        )
-
-        old_memories = cur.fetchall()
-
-        migrated_memories = 0
-
-        for memory in old_memories:
-
-            cur.execute(
-                """
-                INSERT INTO pro_memory
-                (
-                    user_id,
-                    category,
-                    memory_key,
-                    memory_value,
-                    importance,
-                    created_at,
-                    updated_at
-                )
-                VALUES (
-                    %s,
-                    %s,
-                    %s,
-                    %s,
-                    %s,
-                    NOW(),
-                    %s
-                )
-
-                ON CONFLICT (
-                    user_id,
-                    category,
-                    memory_key
-                )
-                DO NOTHING
-                """,
-                (
-                    PRO_OWNER_ID,
-                    memory["category"],
-                    memory["memory_key"],
-                    memory["memory_value"],
-                    memory["importance"],
-                    memory["updated_at"]
-                )
-            )
-
-            if cur.rowcount > 0:
-                migrated_memories += 1
-
-        print(
-            "[MIGRATION] Memories migrated:",
-            migrated_memories
-        )
-
-        cur.execute(
-            """
-            SELECT
-                role,
-                message,
-                created_at
-            FROM pro_messages
-            WHERE user_id <> %s
-            ORDER BY id ASC
-            """,
-            (PRO_OWNER_ID,)
-        )
-
-        old_messages = cur.fetchall()
-
-        migrated_messages = 0
-
-        for message in old_messages:
-
-            cur.execute(
-                """
-                INSERT INTO pro_messages
-                (
-                    user_id,
-                    role,
-                    message,
-                    created_at
-                )
-                VALUES (
-                    %s,
-                    %s,
-                    %s,
-                    %s
-                )
-                """,
-                (
-                    PRO_OWNER_ID,
-                    message["role"],
-                    message["message"],
-                    message["created_at"]
-                )
-            )
-
-            migrated_messages += 1
-
-        print(
-            "[MIGRATION] Messages migrated:",
-            migrated_messages
-        )
-
-        cur.execute(
-            """
-            DELETE FROM pro_users
-            WHERE user_id <> %s
-            """,
-            (PRO_OWNER_ID,)
-        )
-
-        deleted_users = cur.rowcount
-
-        conn.commit()
-
-        print(
-            "[MIGRATION] Old users removed:",
-            deleted_users
-        )
-
-        print(
-            "[MIGRATION] Migration completed successfully."
-        )
-
-    except Exception:
-
-        conn.rollback()
-
-        print(
-            "[MIGRATION] Migration failed - ROLLBACK"
-        )
-
-        traceback.print_exc()
-
-        raise
-
-    finally:
-
-        conn.close()
-
 
 def init_db():
 
@@ -572,15 +431,315 @@ def init_db():
             ON pro_messages(user_id, id DESC)
         """)
 
+        cur.execute("""
+            INSERT INTO pro_users (
+                user_id,
+                name
+            )
+            VALUES (%s, %s)
+            ON CONFLICT (user_id)
+            DO NOTHING
+        """, (
+            PRO_OWNER_ID,
+            "محمود"
+        ))
+
         conn.commit()
 
         print("[DB] تهيئة قاعدة البيانات تمت بنجاح")
+
+    except Exception:
+
+        conn.rollback()
+
+        print("[DB] فشل تهيئة قاعدة البيانات")
+
+        raise
 
     finally:
 
         conn.close()
 
     migrate_old_users()
+
+
+# =========================================================
+# Migrate Old Browser Users
+# =========================================================
+
+def migrate_old_users():
+
+    print("[MIGRATION] Checking old user IDs...")
+
+    conn = get_db()
+
+    try:
+
+        cur = conn.cursor(
+            cursor_factory=RealDictCursor
+        )
+
+        cur.execute(
+            """
+            SELECT user_id
+            FROM pro_users
+            WHERE user_id <> %s
+            ORDER BY created_at ASC
+            """,
+            (PRO_OWNER_ID,)
+        )
+
+        old_users = cur.fetchall()
+
+        if not old_users:
+
+            conn.commit()
+
+            print(
+                "[MIGRATION] No old users found."
+            )
+
+            return
+
+        old_ids = [
+            row["user_id"]
+            for row in old_users
+        ]
+
+        print(
+            "[MIGRATION] Old users found:",
+            len(old_ids)
+        )
+
+        # -------------------------------------------------
+        # Memories
+        # -------------------------------------------------
+
+        cur.execute(
+            """
+            SELECT
+                user_id,
+                category,
+                memory_key,
+                memory_value,
+                importance,
+                updated_at
+            FROM pro_memory
+            WHERE user_id <> %s
+            ORDER BY updated_at DESC
+            """,
+            (PRO_OWNER_ID,)
+        )
+
+        old_memories = cur.fetchall()
+
+        migrated_memories = 0
+
+        for memory in old_memories:
+
+            cur.execute(
+                """
+                INSERT INTO pro_memory
+                (
+                    user_id,
+                    category,
+                    memory_key,
+                    memory_value,
+                    importance,
+                    created_at,
+                    updated_at
+                )
+                VALUES (
+                    %s,
+                    %s,
+                    %s,
+                    %s,
+                    %s,
+                    NOW(),
+                    %s
+                )
+
+                ON CONFLICT (
+                    user_id,
+                    category,
+                    memory_key
+                )
+
+                DO UPDATE SET
+                    memory_value = CASE
+                        WHEN EXCLUDED.updated_at >
+                             pro_memory.updated_at
+                        THEN EXCLUDED.memory_value
+                        ELSE pro_memory.memory_value
+                    END,
+
+                    importance = CASE
+                        WHEN EXCLUDED.updated_at >
+                             pro_memory.updated_at
+                        THEN EXCLUDED.importance
+                        ELSE pro_memory.importance
+                    END,
+
+                    updated_at = GREATEST(
+                        pro_memory.updated_at,
+                        EXCLUDED.updated_at
+                    )
+                """,
+                (
+                    PRO_OWNER_ID,
+                    memory["category"],
+                    memory["memory_key"],
+                    memory["memory_value"],
+                    memory["importance"],
+                    memory["updated_at"]
+                )
+            )
+
+            migrated_memories += 1
+
+        print(
+            "[MIGRATION] Memories processed:",
+            migrated_memories
+        )
+
+        # -------------------------------------------------
+        # Messages
+        # -------------------------------------------------
+
+        cur.execute(
+            """
+            SELECT
+                role,
+                message,
+                created_at
+            FROM pro_messages
+            WHERE user_id <> %s
+            ORDER BY id ASC
+            """,
+            (PRO_OWNER_ID,)
+        )
+
+        old_messages = cur.fetchall()
+
+        migrated_messages = 0
+
+        for message in old_messages:
+
+            cur.execute(
+                """
+                INSERT INTO pro_messages
+                (
+                    user_id,
+                    role,
+                    message,
+                    created_at
+                )
+                VALUES (
+                    %s,
+                    %s,
+                    %s,
+                    %s
+                )
+                """,
+                (
+                    PRO_OWNER_ID,
+                    message["role"],
+                    message["message"],
+                    message["created_at"]
+                )
+            )
+
+            migrated_messages += 1
+
+        print(
+            "[MIGRATION] Messages migrated:",
+            migrated_messages
+        )
+
+        # -------------------------------------------------
+        # Remove old users
+        # -------------------------------------------------
+
+        cur.execute(
+            """
+            DELETE FROM pro_users
+            WHERE user_id <> %s
+            """,
+            (PRO_OWNER_ID,)
+        )
+
+        deleted_users = cur.rowcount
+
+        conn.commit()
+
+        print(
+            "[MIGRATION] Old users removed:",
+            deleted_users
+        )
+
+        print(
+            "[MIGRATION] Migration completed successfully."
+        )
+
+    except Exception:
+
+        conn.rollback()
+
+        print(
+            "[MIGRATION] Migration failed - ROLLBACK"
+        )
+
+        traceback.print_exc()
+
+        raise
+
+    finally:
+
+        conn.close()
+
+
+# =========================================================
+# Memory Validation
+# =========================================================
+
+def clean_memory_key(value):
+
+    if value is None:
+        return ""
+
+    value = str(value).strip()
+
+    if not value:
+        return ""
+
+    if len(value) > MAX_MEMORY_KEY_LENGTH:
+        value = value[:MAX_MEMORY_KEY_LENGTH].strip()
+
+    return value
+
+
+def clean_memory_value(value):
+
+    if value is None:
+        return ""
+
+    value = str(value).strip()
+
+    if not value:
+        return ""
+
+    if len(value) > MAX_MEMORY_VALUE_LENGTH:
+        value = value[:MAX_MEMORY_VALUE_LENGTH].strip()
+
+    return value
+
+
+def normalize_category(value):
+
+    if value is None:
+        return ""
+
+    return str(value).strip().lower()
 
 
 # =========================================================
@@ -595,11 +754,15 @@ def save_memory(
     importance=5
 ):
 
+    category = normalize_category(category)
+    memory_key = clean_memory_key(memory_key)
+    memory_value = clean_memory_value(memory_value)
+
     if category not in ALLOWED_CATEGORIES:
-        return
+        return False
 
     if not memory_key or not memory_value:
-        return
+        return False
 
     try:
 
@@ -619,6 +782,23 @@ def save_memory(
     try:
 
         cur = conn.cursor()
+
+        cur.execute(
+            """
+            INSERT INTO pro_users (
+                user_id,
+                name
+            )
+            VALUES (%s, %s)
+
+            ON CONFLICT (user_id)
+            DO NOTHING
+            """,
+            (
+                user_id,
+                "محمود"
+            )
+        )
 
         cur.execute(
             """
@@ -654,6 +834,14 @@ def save_memory(
 
         conn.commit()
 
+        return True
+
+    except Exception:
+
+        conn.rollback()
+
+        raise
+
     finally:
 
         conn.close()
@@ -664,6 +852,15 @@ def delete_memory(
     category,
     memory_key
 ):
+
+    category = normalize_category(category)
+    memory_key = clean_memory_key(memory_key)
+
+    if category not in ALLOWED_CATEGORIES:
+        return False
+
+    if not memory_key:
+        return False
 
     conn = get_db()
 
@@ -685,7 +882,17 @@ def delete_memory(
             )
         )
 
+        deleted = cur.rowcount > 0
+
         conn.commit()
+
+        return deleted
+
+    except Exception:
+
+        conn.rollback()
+
+        raise
 
     finally:
 
@@ -714,9 +921,12 @@ def get_memories(user_id):
             ORDER BY
                 importance DESC,
                 updated_at DESC
-            LIMIT 50
+            LIMIT %s
             """,
-            (user_id,)
+            (
+                user_id,
+                MAX_MEMORIES_FOR_PROMPT
+            )
         )
 
         return cur.fetchall()
@@ -760,8 +970,9 @@ def parse_ai_response(text):
             "forget": []
         }
 
-    cleaned = text.strip()
+    cleaned = str(text).strip()
 
+    # إزالة Markdown fences
     cleaned = re.sub(
         r"^```json\s*",
         "",
@@ -781,11 +992,19 @@ def parse_ai_response(text):
         cleaned
     )
 
+    data = None
+
+    # محاولة JSON مباشرة
     try:
 
         data = json.loads(cleaned)
 
     except Exception:
+
+        pass
+
+    # محاولة استخراج JSON
+    if data is None:
 
         start = cleaned.find("{")
         end = cleaned.rfind("}")
@@ -800,24 +1019,13 @@ def parse_ai_response(text):
 
             except Exception:
 
-                return {
-                    "reply": text,
-                    "memories": [],
-                    "forget": []
-                }
+                data = None
 
-        else:
-
-            return {
-                "reply": text,
-                "memories": [],
-                "forget": []
-            }
-
+    # إذا فشل JSON
     if not isinstance(data, dict):
 
         return {
-            "reply": text,
+            "reply": cleaned,
             "memories": [],
             "forget": []
         }
@@ -842,15 +1050,93 @@ def parse_ai_response(text):
     )
 
     if not isinstance(memories, list):
+
         memories = []
 
     if not isinstance(forget, list):
+
         forget = []
+
+    clean_memories = []
+
+    for memory in memories:
+
+        if not isinstance(memory, dict):
+            continue
+
+        category = normalize_category(
+            memory.get("category")
+        )
+
+        memory_key = clean_memory_key(
+            memory.get("memory_key")
+        )
+
+        memory_value = clean_memory_value(
+            memory.get("memory_value")
+        )
+
+        if category not in ALLOWED_CATEGORIES:
+            continue
+
+        if not memory_key:
+            continue
+
+        if not memory_value:
+            continue
+
+        importance = memory.get(
+            "importance",
+            5
+        )
+
+        try:
+            importance = int(importance)
+        except Exception:
+            importance = 5
+
+        importance = max(
+            1,
+            min(10, importance)
+        )
+
+        clean_memories.append({
+            "category": category,
+            "memory_key": memory_key,
+            "memory_value": memory_value,
+            "importance": importance
+        })
+
+    clean_forget = []
+
+    for memory in forget:
+
+        if not isinstance(memory, dict):
+            continue
+
+        category = normalize_category(
+            memory.get("category")
+        )
+
+        memory_key = clean_memory_key(
+            memory.get("memory_key")
+        )
+
+        if category not in ALLOWED_CATEGORIES:
+            continue
+
+        if not memory_key:
+            continue
+
+        clean_forget.append({
+            "category": category,
+            "memory_key": memory_key
+        })
 
     return {
         "reply": reply.strip(),
-        "memories": memories,
-        "forget": forget
+        "memories": clean_memories,
+        "forget": clean_forget
     }
 
 
@@ -1140,7 +1426,7 @@ form.addEventListener(
             } catch (jsonError) {
 
                 console.error(
-                    "Invalid JSON from server:",
+                    "Invalid JSON:",
                     text
                 );
 
@@ -1180,13 +1466,13 @@ form.addEventListener(
             ) {
 
                 loading.textContent =
-                    "الطلب أخذ وقت طويل. Render أو Gemini تأخروا. جرب مرة ثانية.";
+                    "الطلب أخذ وقت طويل. جرب مرة ثانية.";
 
             } else {
 
                 loading.textContent =
                     "تعذر الاتصال بالوكيل.\n" +
-                    "افتح Logs في Render لمعرفة الخطأ.";
+                    "راجع Logs في Render.";
 
             }
 
@@ -1262,7 +1548,7 @@ def health():
 
 
 # =========================================================
-# MEMORY TEST - لا يستخدم Gemini
+# MEMORY TEST
 # =========================================================
 
 @app.route(
@@ -1275,6 +1561,7 @@ def memory_test():
 
     test_category = "important"
     test_key = "memory_test"
+
     test_value_1 = "اختبار ذاكرة PRO يعمل"
     test_value_2 = "اختبار تحديث الذاكرة يعمل"
 
@@ -1284,14 +1571,6 @@ def memory_test():
         print("====================================")
         print("[MEMORY TEST] START")
 
-        # -------------------------------------------------
-        # 1. Save
-        # -------------------------------------------------
-
-        print(
-            "[MEMORY TEST] Saving first value..."
-        )
-
         save_memory(
             user_id,
             test_category,
@@ -1300,46 +1579,25 @@ def memory_test():
             7
         )
 
-        # -------------------------------------------------
-        # 2. Read
-        # -------------------------------------------------
-
-        memories_after_save = get_memories(
+        memories = get_memories(
             user_id
         )
 
-        saved_memory = None
-
-        for memory in memories_after_save:
-
-            if (
-                memory["category"] == test_category
+        found = next(
+            (
+                m for m in memories
+                if
+                m["category"] == test_category
                 and
-                memory["memory_key"] == test_key
-            ):
+                m["memory_key"] == test_key
+            ),
+            None
+        )
 
-                saved_memory = memory
-
-                break
-
-        if not saved_memory:
-
+        if not found:
             raise RuntimeError(
                 "فشل حفظ الذاكرة"
             )
-
-        print(
-            "[MEMORY TEST] Save OK:",
-            saved_memory
-        )
-
-        # -------------------------------------------------
-        # 3. Update
-        # -------------------------------------------------
-
-        print(
-            "[MEMORY TEST] Updating same memory key..."
-        )
 
         save_memory(
             user_id,
@@ -1349,55 +1607,30 @@ def memory_test():
             9
         )
 
-        # -------------------------------------------------
-        # 4. Read after update
-        # -------------------------------------------------
-
-        memories_after_update = get_memories(
+        memories = get_memories(
             user_id
         )
 
-        updated_memory = None
-
-        for memory in memories_after_update:
-
-            if (
-                memory["category"] == test_category
+        updated = next(
+            (
+                m for m in memories
+                if
+                m["category"] == test_category
                 and
-                memory["memory_key"] == test_key
-            ):
+                m["memory_key"] == test_key
+            ),
+            None
+        )
 
-                updated_memory = memory
-
-                break
-
-        if not updated_memory:
-
+        if not updated:
             raise RuntimeError(
                 "فشل العثور على الذاكرة بعد التحديث"
             )
 
-        if (
-            updated_memory["memory_value"]
-            != test_value_2
-        ):
-
+        if updated["memory_value"] != test_value_2:
             raise RuntimeError(
                 "فشل تحديث قيمة الذاكرة"
             )
-
-        print(
-            "[MEMORY TEST] Update OK:",
-            updated_memory
-        )
-
-        # -------------------------------------------------
-        # 5. Delete
-        # -------------------------------------------------
-
-        print(
-            "[MEMORY TEST] Deleting test memory..."
-        )
 
         delete_memory(
             user_id,
@@ -1405,37 +1638,25 @@ def memory_test():
             test_key
         )
 
-        # -------------------------------------------------
-        # 6. Verify deletion
-        # -------------------------------------------------
-
-        memories_after_delete = get_memories(
+        memories = get_memories(
             user_id
         )
 
-        deleted_memory = None
-
-        for memory in memories_after_delete:
-
-            if (
-                memory["category"] == test_category
+        deleted = next(
+            (
+                m for m in memories
+                if
+                m["category"] == test_category
                 and
-                memory["memory_key"] == test_key
-            ):
+                m["memory_key"] == test_key
+            ),
+            None
+        )
 
-                deleted_memory = memory
-
-                break
-
-        if deleted_memory:
-
+        if deleted:
             raise RuntimeError(
                 "فشل حذف الذاكرة"
             )
-
-        print(
-            "[MEMORY TEST] Delete OK"
-        )
 
         print(
             "[MEMORY TEST] ALL TESTS PASSED"
@@ -1465,10 +1686,6 @@ def memory_test():
 
         traceback.print_exc()
 
-        print(
-            "===================================="
-        )
-
         return jsonify({
             "status": "error",
             "message": str(e)
@@ -1476,7 +1693,7 @@ def memory_test():
 
 
 # =========================================================
-# MEMORY AI TEST - يحاكي Gemini بدون استخدام Gemini
+# MEMORY AI TEST
 # =========================================================
 
 @app.route(
@@ -1490,18 +1707,19 @@ def memory_ai_test():
     test_category = "projects"
     test_key = "pro_role"
 
-    test_value_1 = "PRO هو الوكيل الذكي الشخصي لمحمود"
-    test_value_2 = "PRO هو الوكيل الشخصي الدائم لمحمود"
+    test_value_1 = (
+        "PRO هو الوكيل الذكي الشخصي لمحمود"
+    )
+
+    test_value_2 = (
+        "PRO هو الوكيل الشخصي الدائم لمحمود"
+    )
 
     try:
 
         print("")
         print("====================================")
         print("[MEMORY AI TEST] START")
-
-        # -------------------------------------------------
-        # 1. Fake AI JSON
-        # -------------------------------------------------
 
         fake_ai_output = json.dumps(
             {
@@ -1519,58 +1737,13 @@ def memory_ai_test():
             ensure_ascii=False
         )
 
-        print(
-            "[MEMORY AI TEST] Fake AI output:"
-        )
-
-        print(
-            fake_ai_output
-        )
-
-        # -------------------------------------------------
-        # 2. Parse fake AI response
-        # -------------------------------------------------
-
         result = parse_ai_response(
             fake_ai_output
         )
 
-        print(
-            "[MEMORY AI TEST] Parsed result:"
-        )
-
-        print(
-            json.dumps(
-                result,
-                ensure_ascii=False,
-                indent=2
-            )
-        )
-
-        if not isinstance(result, dict):
+        if result["reply"] != "تم يا محمود.":
             raise RuntimeError(
-                "Parser رجع نتيجة غير صحيحة"
-            )
-
-        if result.get("reply") != "تم يا محمود.":
-            raise RuntimeError(
-                "فشل اختبار reply في parser"
-            )
-
-        if not isinstance(
-            result.get("memories"),
-            list
-        ):
-            raise RuntimeError(
-                "فشل memories في parser"
-            )
-
-        if not isinstance(
-            result.get("forget"),
-            list
-        ):
-            raise RuntimeError(
-                "فشل forget في parser"
+                "فشل reply"
             )
 
         if len(result["memories"]) != 1:
@@ -1578,113 +1751,55 @@ def memory_ai_test():
                 "Parser لم يرجع memory واحدة"
             )
 
-        parsed_memory = result["memories"][0]
+        memory = result["memories"][0]
 
-        if not isinstance(
-            parsed_memory,
-            dict
-        ):
-            raise RuntimeError(
-                "الـ memory الناتجة من parser ليست object"
-            )
-
-        if (
-            parsed_memory.get("category")
-            != test_category
-        ):
+        if memory["category"] != test_category:
             raise RuntimeError(
                 "category غير صحيحة"
             )
 
-        if (
-            parsed_memory.get("memory_key")
-            != test_key
-        ):
+        if memory["memory_key"] != test_key:
             raise RuntimeError(
                 "memory_key غير صحيح"
             )
 
-        if (
-            parsed_memory.get("memory_value")
-            != test_value_1
-        ):
+        if memory["memory_value"] != test_value_1:
             raise RuntimeError(
                 "memory_value غير صحيحة"
             )
 
-        print(
-            "[MEMORY AI TEST] Parser OK"
-        )
-
-        # -------------------------------------------------
-        # 3. Save memory
-        # -------------------------------------------------
-
-        print(
-            "[MEMORY AI TEST] Saving parsed memory..."
-        )
+        if memory["importance"] != 10:
+            raise RuntimeError(
+                "importance غير صحيحة"
+            )
 
         save_memory(
             user_id,
-            parsed_memory["category"],
-            parsed_memory["memory_key"],
-            parsed_memory["memory_value"],
-            parsed_memory.get("importance", 5)
+            memory["category"],
+            memory["memory_key"],
+            memory["memory_value"],
+            memory["importance"]
         )
 
-        # -------------------------------------------------
-        # 4. Read memory
-        # -------------------------------------------------
-
-        memories_after_save = get_memories(
+        memories = get_memories(
             user_id
         )
 
-        saved_memory = None
-
-        for memory in memories_after_save:
-
-            if (
-                memory["category"] == test_category
+        saved = next(
+            (
+                m for m in memories
+                if
+                m["category"] == test_category
                 and
-                memory["memory_key"] == test_key
-            ):
-
-                saved_memory = memory
-                break
-
-        if not saved_memory:
-            raise RuntimeError(
-                "فشل حفظ memory الناتجة من AI"
-            )
-
-        if (
-            saved_memory["memory_value"]
-            != test_value_1
-        ):
-            raise RuntimeError(
-                "قيمة memory بعد الحفظ غير صحيحة"
-            )
-
-        if int(
-            saved_memory["importance"]
-        ) != 10:
-            raise RuntimeError(
-                "Importance بعد الحفظ غير صحيحة"
-            )
-
-        print(
-            "[MEMORY AI TEST] Save OK:",
-            saved_memory
+                m["memory_key"] == test_key
+            ),
+            None
         )
 
-        # -------------------------------------------------
-        # 5. Update same memory key
-        # -------------------------------------------------
-
-        print(
-            "[MEMORY AI TEST] Updating same memory key..."
-        )
+        if not saved:
+            raise RuntimeError(
+                "فشل حفظ memory"
+            )
 
         save_memory(
             user_id,
@@ -1694,55 +1809,30 @@ def memory_ai_test():
             10
         )
 
-        memories_after_update = get_memories(
+        memories = get_memories(
             user_id
         )
 
-        updated_memory = None
-
-        for memory in memories_after_update:
-
-            if (
-                memory["category"] == test_category
+        updated = next(
+            (
+                m for m in memories
+                if
+                m["category"] == test_category
                 and
-                memory["memory_key"] == test_key
-            ):
+                m["memory_key"] == test_key
+            ),
+            None
+        )
 
-                updated_memory = memory
-                break
-
-        if not updated_memory:
-            raise RuntimeError(
-                "فشل العثور على memory بعد التحديث"
-            )
-
-        if (
-            updated_memory["memory_value"]
-            != test_value_2
-        ):
+        if not updated:
             raise RuntimeError(
                 "فشل تحديث memory"
             )
 
-        if int(
-            updated_memory["importance"]
-        ) != 10:
+        if updated["memory_value"] != test_value_2:
             raise RuntimeError(
-                "Importance بعد التحديث غير صحيحة"
+                "قيمة memory بعد التحديث خاطئة"
             )
-
-        print(
-            "[MEMORY AI TEST] Update OK:",
-            updated_memory
-        )
-
-        # -------------------------------------------------
-        # 6. Delete memory
-        # -------------------------------------------------
-
-        print(
-            "[MEMORY AI TEST] Deleting memory..."
-        )
 
         delete_memory(
             user_id,
@@ -1750,35 +1840,25 @@ def memory_ai_test():
             test_key
         )
 
-        # -------------------------------------------------
-        # 7. Verify deletion
-        # -------------------------------------------------
-
-        memories_after_delete = get_memories(
+        memories = get_memories(
             user_id
         )
 
-        deleted_memory = None
-
-        for memory in memories_after_delete:
-
-            if (
-                memory["category"] == test_category
+        deleted = next(
+            (
+                m for m in memories
+                if
+                m["category"] == test_category
                 and
-                memory["memory_key"] == test_key
-            ):
+                m["memory_key"] == test_key
+            ),
+            None
+        )
 
-                deleted_memory = memory
-                break
-
-        if deleted_memory:
+        if deleted:
             raise RuntimeError(
                 "فشل حذف memory"
             )
-
-        print(
-            "[MEMORY AI TEST] Delete OK"
-        )
 
         print(
             "[MEMORY AI TEST] ALL TESTS PASSED"
@@ -1810,10 +1890,6 @@ def memory_ai_test():
 
         traceback.print_exc()
 
-        print(
-            "===================================="
-        )
-
         return jsonify({
             "status": "error",
             "message": str(e)
@@ -1822,8 +1898,6 @@ def memory_ai_test():
 
 # =========================================================
 # MEMORY CONTEXT TEST
-# يختبر ربط الذاكرة الفعلية بالـ Prompt المستخدم في /chat
-# لا يستخدم Gemini
 # =========================================================
 
 @app.route(
@@ -1836,12 +1910,11 @@ def memory_context_test():
 
     test_category = "important"
 
-    # مفتاح وقيمة فريدين جداً
-    # غير موجودين في SYSTEM_PROMPT
     test_key = "memory_context_test_73921"
+
     test_value = "MEMORY_ONLY_TEST_73921"
 
-    test_results = {
+    tests = {
         "memory_saved": False,
         "memory_retrieved": False,
         "memory_formatted": False,
@@ -1855,28 +1928,11 @@ def memory_context_test():
         print("====================================")
         print("[MEMORY CONTEXT TEST] START")
 
-        # -------------------------------------------------
-        # 1. تأكد أن القيمة ليست موجودة في SYSTEM_PROMPT
-        # -------------------------------------------------
-
         if test_value in SYSTEM_PROMPT:
 
             raise RuntimeError(
-                "قيمة الاختبار موجودة داخل SYSTEM_PROMPT "
-                "ولا يمكن استخدامها لإثبات مصدر الذاكرة"
+                "قيمة الاختبار موجودة داخل SYSTEM_PROMPT"
             )
-
-        print(
-            "[MEMORY CONTEXT TEST] Unique marker verified"
-        )
-
-        # -------------------------------------------------
-        # 2. Save test memory
-        # -------------------------------------------------
-
-        print(
-            "[MEMORY CONTEXT TEST] Saving test memory..."
-        )
 
         save_memory(
             user_id,
@@ -1886,103 +1942,48 @@ def memory_context_test():
             10
         )
 
-        test_results["memory_saved"] = True
-
-        print(
-            "[MEMORY CONTEXT TEST] Save OK"
-        )
-
-        # -------------------------------------------------
-        # 3. Read memory again from database
-        # -------------------------------------------------
-
-        print(
-            "[MEMORY CONTEXT TEST] Reading memory..."
-        )
+        tests["memory_saved"] = True
 
         memories = get_memories(
             user_id
         )
 
-        found_memory = None
-
-        for memory in memories:
-
-            if (
-                memory["category"] == test_category
+        found = next(
+            (
+                m for m in memories
+                if
+                m["category"] == test_category
                 and
-                memory["memory_key"] == test_key
+                m["memory_key"] == test_key
                 and
-                memory["memory_value"] == test_value
-            ):
+                m["memory_value"] == test_value
+            ),
+            None
+        )
 
-                found_memory = memory
-                break
-
-        if not found_memory:
+        if not found:
 
             raise RuntimeError(
                 "الذاكرة التجريبية لم ترجع من PostgreSQL"
             )
 
-        test_results["memory_retrieved"] = True
-
-        print(
-            "[MEMORY CONTEXT TEST] Memory retrieved:",
-            found_memory
-        )
-
-        # -------------------------------------------------
-        # 4. Format memories
-        # -------------------------------------------------
-
-        print(
-            "[MEMORY CONTEXT TEST] Formatting memories..."
-        )
+        tests["memory_retrieved"] = True
 
         memory_text = format_memories(
             memories
         )
 
-        if not memory_text:
-
-            raise RuntimeError(
-                "format_memories رجعت نص فارغ"
-            )
-
         if test_value not in memory_text:
-
             raise RuntimeError(
-                "قيمة الذاكرة غير موجودة في memory_text"
+                "القيمة غير موجودة في memory_text"
             )
 
         if test_key not in memory_text:
-
             raise RuntimeError(
                 "memory_key غير موجود في memory_text"
             )
 
-        test_results["memory_formatted"] = True
-
-        print(
-            "[MEMORY CONTEXT TEST] Formatting OK"
-        )
-
-        print(
-            "[MEMORY CONTEXT TEST] memory_text:"
-        )
-
-        print(
-            memory_text
-        )
-
-        # -------------------------------------------------
-        # 5. Build نفس Prompt المستخدم في /chat
-        # -------------------------------------------------
-
-        print(
-            "[MEMORY CONTEXT TEST] Building chat prompt..."
-        )
+        tests["memory_formatted"] = True
 
         test_conversation = (
             "محمود: اختبار ربط الذاكرة\n"
@@ -1997,77 +1998,40 @@ def memory_context_test():
             + "\n\nأجب على آخر رسالة."
         )
 
-        # -------------------------------------------------
-        # 6. Verify memory exists inside actual prompt
-        # -------------------------------------------------
-
         if test_value not in prompt:
-
             raise RuntimeError(
-                "الذاكرة لم تدخل داخل الـ prompt"
+                "الذاكرة لم تدخل داخل prompt"
             )
 
         if test_key not in prompt:
-
             raise RuntimeError(
-                "memory_key لم يدخل داخل الـ prompt"
+                "memory_key لم يدخل داخل prompt"
             )
 
-        test_results["memory_in_prompt"] = True
+        tests["memory_in_prompt"] = True
 
-        print(
-            "[MEMORY CONTEXT TEST] Memory found inside prompt"
-        )
-
-        # -------------------------------------------------
-        # 7. Verify section placement
-        # -------------------------------------------------
-
-        memory_section_marker = (
+        memory_position = prompt.find(
             "===== الذاكرة ====="
         )
 
-        conversation_section_marker = (
+        conversation_position = prompt.find(
             "===== المحادثة ====="
         )
 
-        memory_section_start = prompt.find(
-            memory_section_marker
-        )
-
-        conversation_section_start = prompt.find(
-            conversation_section_marker
-        )
-
-        if memory_section_start == -1:
-
+        if memory_position == -1:
             raise RuntimeError(
-                "قسم الذاكرة غير موجود في الـ prompt"
+                "قسم الذاكرة غير موجود"
             )
 
-        if conversation_section_start == -1:
-
+        if conversation_position == -1:
             raise RuntimeError(
-                "قسم المحادثة غير موجود في الـ prompt"
+                "قسم المحادثة غير موجود"
             )
 
-        if memory_section_start >= conversation_section_start:
-
+        if memory_position >= conversation_position:
             raise RuntimeError(
-                "ترتيب أقسام الـ prompt غير صحيح"
+                "ترتيب prompt غير صحيح"
             )
-
-        print(
-            "[MEMORY CONTEXT TEST] Prompt structure OK"
-        )
-
-        # -------------------------------------------------
-        # 8. Delete test memory
-        # -------------------------------------------------
-
-        print(
-            "[MEMORY CONTEXT TEST] Deleting test memory..."
-        )
 
         delete_memory(
             user_id,
@@ -2075,42 +2039,27 @@ def memory_context_test():
             test_key
         )
 
-        # -------------------------------------------------
-        # 9. Verify deletion
-        # -------------------------------------------------
-
-        memories_after_delete = get_memories(
+        memories = get_memories(
             user_id
         )
 
-        deleted_memory = None
-
-        for memory in memories_after_delete:
-
-            if (
-                memory["category"] == test_category
+        deleted = next(
+            (
+                m for m in memories
+                if
+                m["category"] == test_category
                 and
-                memory["memory_key"] == test_key
-            ):
+                m["memory_key"] == test_key
+            ),
+            None
+        )
 
-                deleted_memory = memory
-                break
-
-        if deleted_memory:
-
+        if deleted:
             raise RuntimeError(
                 "فشل حذف ذاكرة الاختبار"
             )
 
-        test_results["memory_deleted"] = True
-
-        print(
-            "[MEMORY CONTEXT TEST] Delete OK"
-        )
-
-        # -------------------------------------------------
-        # Final
-        # -------------------------------------------------
+        tests["memory_deleted"] = True
 
         print(
             "[MEMORY CONTEXT TEST] ALL TESTS PASSED"
@@ -2123,7 +2072,7 @@ def memory_context_test():
         return jsonify({
             "status": "ok",
             "message": "اختبار ربط الذاكرة بسياق PRO نجح بالكامل",
-            "tests": test_results
+            "tests": tests
         })
 
     except Exception as e:
@@ -2135,10 +2084,6 @@ def memory_context_test():
 
         traceback.print_exc()
 
-        # -------------------------------------------------
-        # Cleanup حتى لو فشل الاختبار
-        # -------------------------------------------------
-
         try:
 
             delete_memory(
@@ -2147,28 +2092,20 @@ def memory_context_test():
                 test_key
             )
 
-            print(
-                "[MEMORY CONTEXT TEST] Cleanup completed"
-            )
-
         except Exception:
 
-            print(
-                "[MEMORY CONTEXT TEST] Cleanup failed"
-            )
-
             traceback.print_exc()
-
-        print(
-            "===================================="
-        )
 
         return jsonify({
             "status": "error",
             "message": str(e),
-            "tests": test_results
+            "tests": tests
         }), 500
 
+
+# =========================================================
+# CHAT
+# =========================================================
 
 @app.route(
     "/chat",
@@ -2184,30 +2121,17 @@ def chat():
 
     try:
 
-        # -------------------------------------------------
-        # Read request
-        # -------------------------------------------------
-
         data = request.get_json(
             silent=True
         ) or {}
 
-        message = data.get(
-            "message",
-            ""
+        message = str(
+            data.get("message", "")
         ).strip()
-
-        # -------------------------------------------------
-        # الهوية ثابتة من السيرفر
-        # -------------------------------------------------
 
         user_id = PRO_OWNER_ID
 
         if not message:
-
-            print(
-                "[CHAT] ERROR: empty message"
-            )
 
             return jsonify({
                 "error": "اكتب رسالة أولاً"
@@ -2220,18 +2144,14 @@ def chat():
 
         print(
             "[CHAT] message:",
-            message[:100]
+            message[:150]
         )
 
         # -------------------------------------------------
-        # Database - user + message
+        # Save user message
         # -------------------------------------------------
 
-        print("[DB] Connecting...")
-
         conn = get_db()
-
-        print("[DB] Connected")
 
         try:
 
@@ -2241,13 +2161,19 @@ def chat():
 
             cur.execute(
                 """
-                INSERT INTO pro_users (user_id)
-                VALUES (%s)
+                INSERT INTO pro_users (
+                    user_id,
+                    name
+                )
+                VALUES (%s, %s)
 
                 ON CONFLICT (user_id)
                 DO NOTHING
                 """,
-                (user_id,)
+                (
+                    user_id,
+                    "محمود"
+                )
             )
 
             cur.execute(
@@ -2269,12 +2195,8 @@ def chat():
 
             conn.commit()
 
-            print(
-                "[DB] User message saved"
-            )
-
             # -------------------------------------------------
-            # Conversation history
+            # Load conversation
             # -------------------------------------------------
 
             cur.execute(
@@ -2285,9 +2207,12 @@ def chat():
                 FROM pro_messages
                 WHERE user_id = %s
                 ORDER BY id DESC
-                LIMIT 20
+                LIMIT %s
                 """,
-                (user_id,)
+                (
+                    user_id,
+                    MAX_MESSAGES_FOR_PROMPT
+                )
             )
 
             rows = list(
@@ -2296,21 +2221,24 @@ def chat():
                 )
             )
 
+        except Exception:
+
+            conn.rollback()
+
+            raise
+
         finally:
 
             conn.close()
 
         print(
             "[DB] Conversation loaded:",
-            len(rows),
-            "messages"
+            len(rows)
         )
 
         # -------------------------------------------------
-        # Memories
+        # Load persistent memory
         # -------------------------------------------------
-
-        print("[MEMORY] Loading...")
 
         memories = get_memories(
             user_id
@@ -2330,7 +2258,7 @@ def chat():
         # Build conversation
         # -------------------------------------------------
 
-        conversation = ""
+        conversation_parts = []
 
         for item in rows:
 
@@ -2342,12 +2270,19 @@ def chat():
 
                 speaker = "PRO AI Agent"
 
-            conversation += (
+            conversation_parts.append(
                 speaker
                 + ": "
-                + item["message"]
-                + "\n"
+                + str(item["message"])
             )
+
+        conversation = "\n".join(
+            conversation_parts
+        )
+
+        # -------------------------------------------------
+        # Build final prompt
+        # -------------------------------------------------
 
         prompt = (
             SYSTEM_PROMPT
@@ -2356,6 +2291,11 @@ def chat():
             + "\n\n===== المحادثة =====\n"
             + conversation
             + "\n\nأجب على آخر رسالة."
+        )
+
+        print(
+            "[PROMPT] Length:",
+            len(prompt)
         )
 
         # -------------------------------------------------
@@ -2404,10 +2344,6 @@ def chat():
 
             traceback.print_exc()
 
-            # -------------------------------------------------
-            # Gemini Rate Limit / Quota
-            # -------------------------------------------------
-
             if (
                 "429" in error_text
                 or
@@ -2418,20 +2354,12 @@ def chat():
                 "quota" in error_text.lower()
             ):
 
-                print(
-                    "[GEMINI] RATE LIMIT / QUOTA"
-                )
-
                 return jsonify({
                     "error":
                         "Gemini غير متاح حالياً بسبب تجاوز حد الاستخدام. "
                         "قاعدة بيانات وذاكرة PRO شغالات بشكل طبيعي. "
                         "جرب بعد ما يتجدد الحد."
                 }), 429
-
-            # -------------------------------------------------
-            # Other Gemini errors
-            # -------------------------------------------------
 
             return jsonify({
                 "error":
@@ -2450,7 +2378,11 @@ def chat():
             "seconds"
         )
 
-        raw_output = interaction.output_text
+        raw_output = getattr(
+            interaction,
+            "output_text",
+            None
+        )
 
         if not raw_output:
 
@@ -2464,7 +2396,7 @@ def chat():
         )
 
         # -------------------------------------------------
-        # Parse AI response
+        # Parse
         # -------------------------------------------------
 
         result = parse_ai_response(
@@ -2485,22 +2417,12 @@ def chat():
 
         print(
             "[MEMORY DEBUG] memories count:",
-            len(
-                result.get(
-                    "memories",
-                    []
-                )
-            )
+            len(result["memories"])
         )
 
         print(
             "[MEMORY DEBUG] forget count:",
-            len(
-                result.get(
-                    "forget",
-                    []
-                )
-            )
+            len(result["forget"])
         )
 
         reply = result["reply"]
@@ -2510,122 +2432,94 @@ def chat():
             reply = "تمام يا محمود."
 
         # -------------------------------------------------
-        # Save memories
+        # Save memories generated by Gemini
         # -------------------------------------------------
 
         print(
-            "[MEMORY] Processing new memories..."
+            "[MEMORY] Processing memories..."
         )
+
+        saved_count = 0
 
         for memory in result["memories"]:
 
-            if not isinstance(
-                memory,
-                dict
-            ):
-                continue
+            try:
 
-            category = str(
-                memory.get(
-                    "category",
-                    ""
+                saved = save_memory(
+                    user_id,
+                    memory["category"],
+                    memory["memory_key"],
+                    memory["memory_value"],
+                    memory["importance"]
                 )
-            ).strip().lower()
 
-            memory_key = str(
-                memory.get(
-                    "memory_key",
-                    ""
+                if saved:
+
+                    saved_count += 1
+
+                    print(
+                        "[MEMORY] SAVED:",
+                        memory["category"],
+                        memory["memory_key"]
+                    )
+
+            except Exception as memory_error:
+
+                print(
+                    "[MEMORY] SAVE ERROR:",
+                    str(memory_error)
                 )
-            ).strip()
 
-            memory_value = str(
-                memory.get(
-                    "memory_value",
-                    ""
-                )
-            ).strip()
-
-            importance = memory.get(
-                "importance",
-                5
-            )
-
-            if category not in ALLOWED_CATEGORIES:
-                continue
-
-            if not memory_key or not memory_value:
-                continue
-
-            print(
-                "[MEMORY] Saving:",
-                category,
-                memory_key
-            )
-
-            save_memory(
-                user_id,
-                category,
-                memory_key,
-                memory_value,
-                importance
-            )
+                traceback.print_exc()
 
         print(
-            "[MEMORY] New memories processed"
+            "[MEMORY] Saved:",
+            saved_count
         )
 
         # -------------------------------------------------
         # Forget memories
         # -------------------------------------------------
 
+        deleted_count = 0
+
         for memory in result["forget"]:
 
-            if not isinstance(
-                memory,
-                dict
-            ):
-                continue
+            try:
 
-            category = str(
-                memory.get(
-                    "category",
-                    ""
+                deleted = delete_memory(
+                    user_id,
+                    memory["category"],
+                    memory["memory_key"]
                 )
-            ).strip().lower()
 
-            memory_key = str(
-                memory.get(
-                    "memory_key",
-                    ""
+                if deleted:
+
+                    deleted_count += 1
+
+                    print(
+                        "[MEMORY] FORGOTTEN:",
+                        memory["category"],
+                        memory["memory_key"]
+                    )
+
+            except Exception as forget_error:
+
+                print(
+                    "[MEMORY] DELETE ERROR:",
+                    str(forget_error)
                 )
-            ).strip()
 
-            if category not in ALLOWED_CATEGORIES:
-                continue
+                traceback.print_exc()
 
-            if not memory_key:
-                continue
-
-            print(
-                "[MEMORY] Forget:",
-                category,
-                memory_key
-            )
-
-            delete_memory(
-                user_id,
-                category,
-                memory_key
-            )
+        print(
+            "[MEMORY] Deleted:",
+            deleted_count
+        )
 
         # -------------------------------------------------
         # Save assistant reply
         # -------------------------------------------------
-
-        print(
-            "[DB] Saving assistant reply..."
-        )
 
         conn = get_db()
 
@@ -2652,21 +2546,15 @@ def chat():
 
             conn.commit()
 
+        except Exception:
+
+            conn.rollback()
+
+            raise
+
         finally:
 
             conn.close()
-
-        # -------------------------------------------------
-        # Guarantee name memory
-        # -------------------------------------------------
-
-        save_memory(
-            user_id,
-            "personal",
-            "name",
-            "محمود",
-            10
-        )
 
         # -------------------------------------------------
         # Done
@@ -2697,8 +2585,6 @@ def chat():
             time.time()
             - request_start
         )
-
-        print("")
 
         print(
             "[CHAT] ERROR after",
@@ -2754,6 +2640,10 @@ except Exception as e:
 
     traceback.print_exc()
 
+
+# =========================================================
+# Local Run
+# =========================================================
 
 if __name__ == "__main__":
 
