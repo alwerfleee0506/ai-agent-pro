@@ -1,5 +1,5 @@
 from flask import Flask, request, jsonify, render_template_string, Response
-import os, json, re, time, traceback
+import os, json, re, time, traceback, base64, threading
 import psycopg2
 from psycopg2.extras import RealDictCursor
 import requests
@@ -8,6 +8,11 @@ app = Flask(__name__)
 DATABASE_URL = os.getenv('DATABASE_URL')
 GROQ_API_KEY = os.getenv('GROQ_API_KEY')
 GROQ_MODEL = os.getenv('GROQ_MODEL', 'openai/gpt-oss-120b')
+CLOUDFLARE_API_TOKEN = os.getenv('CLOUDFLARE_API_TOKEN', '').strip()
+CLOUDFLARE_ACCOUNT_ID = os.getenv('CLOUDFLARE_ACCOUNT_ID', '').strip()
+IMAGE_MODEL = '@cf/black-forest-labs/flux-1-schnell'
+image_lock = threading.Lock()
+last_image_request = 0.0
 PRO_OWNER_ID = 'mahmoud'
 ALLOWED_CATEGORIES = {'personal', 'preferences', 'projects', 'important'}
 MAX_MEMORY_KEY_LENGTH = 120
@@ -133,14 +138,14 @@ def call_groq(memory_text,rows,voice=False):
 HTML = r'''<!doctype html><html lang="ar" dir="rtl"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>PRO AI Agent</title>
 <style>*{box-sizing:border-box}body{margin:0;padding:16px;background:#10151e;color:#edf3ff;font-family:Arial,sans-serif}.container{max-width:650px;margin:auto}h1{text-align:center;font-size:26px}.panel{background:#1b2534;border:1px solid #304159;border-radius:16px;padding:14px;margin-bottom:12px}.controls{display:flex;gap:8px;flex-wrap:wrap}button,select,input{font:inherit;border:0;border-radius:10px;padding:12px}button{cursor:pointer;background:#2d435e;color:white}button:disabled{opacity:.45;cursor:default}#start{background:#19815b}#end{background:#ac3946}select{width:100%;background:#111b29;color:white;margin-top:10px}#callStatus{margin:12px 0;color:#9fdcc4}small{display:block;color:#aab7c9;line-height:1.6}#chat{height:47vh;min-height:220px;overflow:auto;background:#151e2a;border-radius:16px;padding:12px;margin-bottom:12px}.message{padding:12px;margin:8px 0;border-radius:12px;white-space:pre-wrap;overflow-wrap:anywhere}.user{background:#294565}.ai{background:#253142}form{display:flex;gap:8px}input{min-width:0;flex:1;background:#edf3ff}#status{min-height:22px;font-size:13px;color:#b6c5d8;margin-top:8px}</style></head>
 <body><main class="container"><h1>🤖 PRO AI Agent</h1><section class="panel"><div class="controls"><button id="start" type="button">📞 بدء المكالمة</button><button id="end" type="button" disabled>إنهاء</button><button id="interrupt" type="button" disabled>قاطع الرد</button><button id="test" type="button">جرّب الصوت</button></div><div id="callStatus" role="status" aria-live="polite">المكالمة متوقفة</div><label for="voices">صوت PRO</label><select id="voices"><option value="fahad">فهد — رجالي عربي</option><option value="abdullah">عبدالله — رجالي عربي</option><option value="sultan">سلطان — رجالي عربي</option></select><small>يسمعك ثم يرد ويرجع يسمع تلقائياً. الصوت من Groq بحدود الخطة المجانية، والنطق سعودي. الرد مكتوب باللهجة الليبية لكن نطقها غير مضمون. افتح الصفحة في Chrome وخلي الشاشة مفتوحة. تحويل كلامك إلى نص قد يتم عبر خدمة المتصفح.</small></section>
-<div id="chat" aria-live="polite"><div class="message ai">السلام عليكم، أنا PRO. اكتبلي أو ابدأ المكالمة.</div></div><form id="form"><input id="message" placeholder="اكتب رسالتك…" autocomplete="off" aria-label="رسالتك"><button id="sendButton">إرسال</button></form><div id="status" role="status"></div></main><script>
+<div id="chat" aria-live="polite"><div class="message ai">السلام عليكم، أنا PRO. اكتبلي أو ابدأ المكالمة.</div></div><form id="form"><input id="message" placeholder="اكتب رسالتك…" autocomplete="off" aria-label="رسالتك"><button id="sendButton">إرسال</button></form><button id="imageButton" type="button" style="margin-top:10px;background:#6654bd">🎨 صمّم صورة من الوصف المكتوب</button><small>اكتب وصف الصورة في خانة الرسالة ثم اضغط صمّم صورة. الخدمة تنشئ صوراً جديدة، والحصة المجانية تتجدد يومياً.</small><div id="status" role="status"></div></main><script>
 'use strict';
 const $=id=>document.getElementById(id), form=$('form'),input=$('message'),chat=$('chat'),send=$('sendButton'),status=$('status'),start=$('start'),end=$('end'),interrupt=$('interrupt'),test=$('test'),voices=$('voices'),callStatus=$('callStatus');
 const Recognition=window.SpeechRecognition||window.webkitSpeechRecognition, synth=window.speechSynthesis;
 let active=false,busy=false,speaking=false,recognition=null,restartTimer=null,session=0,speechToken=0,wakeLock=null,audioController=null,liveAudio=null,audioURL=null,stopPlayback=null;
 function addMessage(text,role){const el=document.createElement('div');el.className='message '+role;el.textContent=text;chat.appendChild(el);chat.scrollTop=chat.scrollHeight;return el}
 function setCall(text){callStatus.textContent=text}
-function update(){start.disabled=active||busy||speaking;end.disabled=!active;interrupt.disabled=!active||!speaking;send.disabled=busy||active;input.disabled=busy||active;voices.disabled=active||speaking;test.disabled=active||busy||speaking}
+function update(){start.disabled=active||busy||speaking;end.disabled=!active;interrupt.disabled=!active||!speaking;send.disabled=busy||active;input.disabled=busy||active;voices.disabled=active||speaking;test.disabled=active||busy||speaking;$('imageButton').disabled=active||busy||speaking}
 try{const saved=localStorage.getItem('proGroqVoice');if(['fahad','abdullah','sultan'].includes(saved))voices.value=saved}catch(_){}
 voices.addEventListener('change',()=>{try{localStorage.setItem('proGroqVoice',voices.value)}catch(_){}});
 function stopRecognition(){clearTimeout(restartTimer);restartTimer=null;const r=recognition;recognition=null;if(r){r.onend=r.onresult=r.onerror=r.onstart=null;try{r.abort()}catch(_){}}}
@@ -156,6 +161,21 @@ function listen(){if(!active||busy||speaking||recognition||document.hidden)retur
 async function sendMessage(message,voice=false,id=session){if(busy)return;stopRecognition();busy=true;update();status.textContent='PRO يعالج الرسالة…';if(voice)setCall('PRO يفكر…');addMessage(message,'user');const loading=addMessage('جاري التفكير…','ai');const controller=new AbortController();const timer=setTimeout(()=>controller.abort(),70000);let reply='',ok=false;
 try{const response=await fetch('/chat',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({message,voice}),signal:controller.signal});const data=await response.json();reply=response.ok?(data.reply||'تمام.'):(data.error||'صار خطأ في الخادم.');loading.textContent=reply;ok=response.ok}catch(err){loading.textContent=err.name==='AbortError'?'الطلب أخذ وقت طويل. ما نعرفوش هل اكتمل على الخادم.':'تعذر الاتصال بـ PRO. جرّب بعد شوية.'}finally{clearTimeout(timer);busy=false;status.textContent='';update();chat.scrollTop=chat.scrollHeight}
 if(voice&&active&&id===session){if(ok)speak(reply,scheduleListen);else stopCall('المكالمة توقفت بسبب خطأ. التفاصيل في الدردشة.')}else if(!active&&!voice)input.focus()}
+
+$('imageButton').addEventListener('click',async()=>{
+ if(busy||active||speaking)return;
+ const prompt=input.value.trim();if(!prompt){status.textContent='اكتب وصف الصورة أولاً.';input.focus();return}
+ busy=true;update();status.textContent='PRO يصمّم الصورة…';addMessage('صمّم صورة: '+prompt,'user');
+ const loading=addMessage('جاري تصميم الصورة…','ai');const controller=new AbortController();const timer=setTimeout(()=>controller.abort(),45000);
+ try{const response=await fetch('/generate-image',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({prompt}),signal:controller.signal});const data=await response.json();
+ if(!response.ok)throw new Error(data.error||'تعذر تصميم الصورة.');
+ if(typeof data.image!=='string'||!data.image.startsWith('data:image/jpeg;base64,'))throw new Error('وصلت نتيجة غير صالحة.');
+ loading.textContent='';const img=document.createElement('img');img.src=data.image;img.alt=prompt;img.style.cssText='display:block;width:100%;border-radius:12px;margin-bottom:12px';
+ const link=document.createElement('a');link.href=data.image;link.download='PRO-image.jpg';link.textContent='تنزيل الصورة';link.style.color='#b9d7ff';loading.append(img,link);input.value='';
+ }catch(err){loading.textContent=err.name==='AbortError'?'الطلب أخذ وقت طويل. ممكن يكون اكتمل على الخادم؛ تجنب تكراره فوراً.':err.message}
+ finally{clearTimeout(timer);busy=false;status.textContent='';update();chat.scrollTop=chat.scrollHeight;input.focus()}
+});
+
 form.addEventListener('submit',e=>{e.preventDefault();if(busy||active)return;const text=input.value.trim();if(!text)return;input.value='';void sendMessage(text)});
 start.addEventListener('click',()=>{if(active||busy||speaking)return;if(!window.isSecureContext){setCall('الميكروفون يحتاج رابط HTTPS.');return}if(!Recognition){setCall('التعرّف على الكلام مش مدعوم هنا. افتح رابط PRO في Chrome.');return}active=true;session++;update();listen();if(navigator.wakeLock){navigator.wakeLock.request('screen').then(lock=>{if(active)wakeLock=lock;else void lock.release()}).catch(()=>{})}});
 end.addEventListener('click',()=>stopCall());interrupt.addEventListener('click',()=>{if(!active||!speaking)return;cancelSpeech();setCall('الرد توقف، نرجع نسمع فيك…');scheduleListen()});test.addEventListener('click',()=>{speak('السلام عليكم يا محمود. أنا برو، شن نقدر نساعدك فيه اليوم؟',()=>setCall('اختبار الصوت انتهى'))});
@@ -165,6 +185,54 @@ document.addEventListener('visibilitychange',()=>{if(document.hidden&&active)sto
 @app.route('/')
 def home(): return render_template_string(HTML)
 
+
+
+@app.route('/generate-image', methods=['POST'])
+def generate_image():
+    global last_image_request
+    data = request.get_json(silent=True)
+    if not isinstance(data, dict):
+        return jsonify({'error': 'طلب غير صالح'}), 400
+    prompt = data.get('prompt')
+    if not isinstance(prompt, str) or not prompt.strip() or len(prompt.strip()) > 2048:
+        return jsonify({'error': 'وصف الصورة لازم يكون بين 1 و2048 حرف'}), 400
+    if not CLOUDFLARE_API_TOKEN or not re.fullmatch(r'[a-fA-F0-9]{32}', CLOUDFLARE_ACCOUNT_ID):
+        return jsonify({'error': 'راجع متغيرات CLOUDFLARE_API_TOKEN وCLOUDFLARE_ACCOUNT_ID في Render.'}), 503
+    if not image_lock.acquire(blocking=False):
+        return jsonify({'error': 'في صورة قيد التصميم. انتظر لين تكمل.'}), 429
+    try:
+        now = time.monotonic()
+        if now - last_image_request < 10:
+            return jsonify({'error': 'انتظر 10 ثواني بين طلبات الصور.'}), 429
+        last_image_request = now
+        response = requests.post(
+            'https://api.cloudflare.com/client/v4/accounts/' + CLOUDFLARE_ACCOUNT_ID + '/ai/run/' + IMAGE_MODEL,
+            headers={'Authorization': 'Bearer ' + CLOUDFLARE_API_TOKEN},
+            json={'prompt': prompt.strip(), 'steps': 4}, timeout=(5, 20))
+        if response.status_code in (401, 403):
+            return jsonify({'error': 'Cloudflare رفض الاتصال. راجع المفتاح وصلاحيات Workers AI والحساب.'}), 502
+        if response.status_code == 429:
+            return jsonify({'error': 'وصلنا لحد الاستخدام أو الخدمة مزدحمة. جرّب لاحقاً.'}), 429
+        if response.status_code != 200:
+            print('[IMAGE] Cloudflare HTTP', response.status_code)
+            return jsonify({'error': 'Cloudflare رجّع خطأ ' + str(response.status_code)}), 502
+        payload = response.json()
+        result = payload.get('result') if isinstance(payload, dict) and payload.get('success') else None
+        encoded = result.get('image') if isinstance(result, dict) else None
+        if not isinstance(encoded, str) or len(encoded) > 16000000:
+            return jsonify({'error': 'خدمة الصور لم ترجع صورة صالحة.'}), 502
+        image_bytes = base64.b64decode(encoded, validate=True)
+        if not image_bytes.startswith(b'\xff\xd8\xff'):
+            return jsonify({'error': 'خدمة الصور لم ترجع صورة JPEG صالحة.'}), 502
+        return jsonify({'image': 'data:image/jpeg;base64,' + encoded}), 200, {'Cache-Control': 'no-store'}
+    except requests.Timeout:
+        return jsonify({'error': 'خدمة الصور تأخرت. جرّب بعد شوية.'}), 504
+    except requests.RequestException:
+        return jsonify({'error': 'تعذر الاتصال بخدمة الصور.'}), 502
+    except (ValueError, TypeError):
+        return jsonify({'error': 'استجابة خدمة الصور غير صالحة.'}), 502
+    finally:
+        image_lock.release()
 
 @app.route('/speech', methods=['POST'])
 def speech():
