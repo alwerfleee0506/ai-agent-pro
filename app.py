@@ -1,12 +1,11 @@
 from flask import Flask, request, jsonify, render_template_string, Response
-import os, json, re, time, traceback, base64, threading, io, zlib
+import os, json, re, time, traceback, base64, threading, io
 import psycopg2
 from psycopg2.extras import RealDictCursor
 import requests
 
 app = Flask(__name__)
 app.config["MAX_CONTENT_LENGTH"] = 8 * 1024 * 1024
-document_lock = threading.Lock()
 GROQ_VISION_MODEL = os.getenv("GROQ_VISION_MODEL", "qwen/qwen3.8-27b")
 DATABASE_URL = os.getenv('DATABASE_URL')
 GROQ_API_KEY = os.getenv('GROQ_API_KEY')
@@ -146,7 +145,7 @@ def call_groq(memory_text,rows,voice=False,images=None,video=False):
 HTML = r'''<!doctype html><html lang="ar" dir="rtl"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>pro</title>
 <style>*{box-sizing:border-box}body{margin:0;padding:16px;background:#10151e;color:#edf3ff;font-family:Arial,sans-serif}.container{max-width:650px;margin:auto}h1{text-align:center;font-size:26px}.panel{background:#1b2534;border:1px solid #304159;border-radius:16px;padding:14px;margin-bottom:12px}.controls{display:flex;gap:8px;flex-wrap:wrap}button,select,input{font:inherit;border:0;border-radius:10px;padding:12px}button{cursor:pointer;background:#2d435e;color:white}button:disabled{opacity:.45;cursor:default}#start{background:#19815b}#end{background:#ac3946}select{width:100%;background:#111b29;color:white;margin-top:10px}#callStatus{margin:12px 0;color:#9fdcc4}small{display:block;color:#aab7c9;line-height:1.6}#chat{height:47vh;min-height:220px;overflow:auto;background:#151e2a;border-radius:16px;padding:12px;margin-bottom:12px}.message{padding:12px;margin:8px 0;border-radius:12px;white-space:pre-wrap;overflow-wrap:anywhere}.user{background:#294565}.ai{background:#253142}form{display:flex;gap:8px}input{min-width:0;flex:1;background:#edf3ff}#status{min-height:22px;font-size:13px;color:#b6c5d8;margin-top:8px}</style></head>
 <body><main class="container"><h1 style="margin-bottom:6px">pro</h1><p style="text-align:center;margin:0 0 18px;color:#b6c5d8">فكرة وتصميم محمود</p><section class="panel"><div class="controls"><button id="start" type="button">📞 بدء المكالمة</button><button id="end" type="button" disabled>إنهاء</button><button id="interrupt" type="button" disabled>قاطع الرد</button><button id="test" type="button">جرّب الصوت</button></div><div id="callStatus" role="status" aria-live="polite">المكالمة متوقفة</div><label for="voices">صوت PRO</label><select id="voices"><option value="fahad">فهد — رجالي عربي</option><option value="abdullah">عبدالله — رجالي عربي</option><option value="sultan">سلطان — رجالي عربي</option></select><small>يسمعك ثم يرد ويرجع يسمع تلقائياً. الصوت من Groq بحدود الخطة المجانية، والنطق سعودي. الرد مكتوب باللهجة الليبية لكن نطقها غير مضمون. افتح الصفحة في Chrome وخلي الشاشة مفتوحة. تحويل كلامك إلى نص قد يتم عبر خدمة المتصفح.</small></section>
-<div id="chat" aria-live="polite"><div class="message ai">السلام عليكم، أنا PRO. اكتبلي أو ابدأ المكالمة.</div></div><form id="form"><input id="message" placeholder="اكتب رسالتك…" autocomplete="off" aria-label="رسالتك"><button id="sendButton">إرسال</button></form><div style="margin-top:12px"><input id="mediaFile" type="file" accept="image/*,video/*" hidden><button id="attachButton" type="button">📎 إرفاق صورة أو فيديو</button> <button id="removeMedia" type="button">إزالة المرفق</button><div id="mediaPreview" style="margin-top:10px"></div><small>المرفق يُرسل مع رسائلك حتى تضغط إزالة المرفق. الصور للتحليل، والفيديو يُحلّل من ثلاث لقطات بدون الصوت.</small></div><button id="imageButton" type="button" style="margin-top:10px;background:#6654bd">🎨 صمّم صورة من الوصف المكتوب</button><label style="display:block;margin-top:12px"><input id="continueImage" type="checkbox" disabled> متابعة آخر تصميم</label><small>اكتب وصف الصورة بالعربي أو الإنجليزي ثم اضغط صمّم صورة. عند متابعة التصميم، اكتب ملاحظتك فقط. لإنتاج تصميم جديد، ألغِ متابعة آخر تصميم. كل تعديل يعيد توليد الصورة وقد يغيّر بعض التفاصيل. الخدمة تنشئ صوراً جديدة، والحصة المجانية تتجدد يومياً.</small><label style="display:block;margin-top:12px">نص فوق الصورة (اختياري)<input id="imageText" maxlength="120" placeholder="مثال: شركة بابل" style="width:100%;box-sizing:border-box"></label><label>مكان النص <select id="textPosition"><option value="bottom">أسفل</option><option value="center">وسط</option><option value="top">أعلى</option></select></label><small>النص يُضاف بخط عربي واضح بعد توليد الصورة، حتى 3 أسطر.</small><details style="margin-top:20px"><summary>📄 إنشاء Word أو PDF</summary><small>اطلب من pro كتابة المستند في الدردشة، ثم استخدم آخر رد وراجع النص هنا. Word قابل للتعديل، وPDF يحفظ العربية كصفحات مصوّرة.</small><input id="docTitle" maxlength="120" placeholder="عنوان المستند" style="display:block;width:100%;box-sizing:border-box;margin-top:10px"><textarea id="docBody" maxlength="30000" rows="9" dir="auto" placeholder="نص المستند" style="display:block;width:100%;box-sizing:border-box;margin:10px 0;font:inherit"></textarea><button id="useLastReply" type="button">استخدم آخر رد</button> <button id="docWord" type="button">تنزيل Word</button> <button id="docPdf" type="button">تنزيل PDF</button></details><div id="status" role="status"></div><footer style="text-align:center;color:#aab7c9;font-size:13px;margin-top:20px;padding:12px 0">جميع الحقوق محفوظة شركة بابل</footer></main><script>
+<div id="chat" aria-live="polite"><div class="message ai">السلام عليكم، أنا PRO. اكتبلي أو ابدأ المكالمة.</div></div><form id="form"><input id="message" placeholder="اكتب رسالتك…" autocomplete="off" aria-label="رسالتك"><button id="sendButton">إرسال</button></form><div style="margin-top:12px"><input id="mediaFile" type="file" accept="image/*,video/*" hidden><button id="attachButton" type="button">📎 إرفاق صورة أو فيديو</button> <button id="removeMedia" type="button">إزالة المرفق</button><div id="mediaPreview" style="margin-top:10px"></div><small>المرفق يُرسل مع رسائلك حتى تضغط إزالة المرفق. الصور للتحليل، والفيديو يُحلّل من ثلاث لقطات بدون الصوت.</small></div><button id="imageButton" type="button" style="margin-top:10px;background:#6654bd">🎨 صمّم صورة من الوصف المكتوب</button><label style="display:block;margin-top:12px"><input id="continueImage" type="checkbox" disabled> متابعة آخر تصميم</label><small>اكتب وصف الصورة بالعربي أو الإنجليزي ثم اضغط صمّم صورة. عند متابعة التصميم، اكتب ملاحظتك فقط. لإنتاج تصميم جديد، ألغِ متابعة آخر تصميم. كل تعديل يعيد توليد الصورة وقد يغيّر بعض التفاصيل. الخدمة تنشئ صوراً جديدة، والحصة المجانية تتجدد يومياً.</small><div id="status" role="status"></div><footer style="text-align:center;color:#aab7c9;font-size:13px;margin-top:20px;padding:12px 0">جميع الحقوق محفوظة شركة بابل</footer></main><script>
 'use strict';
 const $=id=>document.getElementById(id), form=$('form'),input=$('message'),chat=$('chat'),send=$('sendButton'),status=$('status'),start=$('start'),end=$('end'),interrupt=$('interrupt'),test=$('test'),voices=$('voices'),callStatus=$('callStatus');
 const Recognition=window.SpeechRecognition||window.webkitSpeechRecognition, synth=window.speechSynthesis;
@@ -168,11 +167,11 @@ try{for(const chunk of speechChunks(text)){if(token!==speechToken)return;const c
 catch(err){if(token!==speechToken)return;const message=err.name==='AbortError'?'توليد الصوت أخذ وقت طويل. جرّب مرة ثانية.':err.message;cancelSpeech();if(active)stopCall(message);else setCall(message)}}
 function listen(){if(!active||busy||speaking||recognition||document.hidden)return;const id=session;const r=new Recognition();recognition=r;r.lang='ar-LY';r.continuous=false;r.interimResults=true;r.maxAlternatives=1;let finalText='',draft='',failure='';r.onstart=()=>{if(active&&id===session)setCall('🎙️ نسمع فيك…')};r.onresult=e=>{if(!active||id!==session||recognition!==r)return;draft='';for(let i=0;i<e.results.length;i++){if(e.results[i].isFinal)finalText+=e.results[i][0].transcript+' ';else draft+=e.results[i][0].transcript}setCall('🎙️ '+(finalText||draft||'نسمع فيك…'))};r.onerror=e=>{if(recognition!==r||id!==session)return;failure=e.error;const notes={'not-allowed':'اسمح للصفحة باستعمال الميكروفون ثم أعد الاتصال.','service-not-allowed':'خدمة التعرف على الكلام غير متاحة في المتصفح.','audio-capture':'الميكروفون غير متاح.','network':'تعذر الاتصال بخدمة التعرف على الكلام. جرّب مرة ثانية.','language-not-supported':'المتصفح لا يدعم لغة التعرف المختارة.'};if(notes[e.error])stopCall(notes[e.error]);else if(!['no-speech','aborted'].includes(e.error))stopCall('خطأ في التعرف على الكلام: '+e.error)};r.onend=()=>{if(recognition!==r)return;recognition=null;if(!active||id!==session)return;const text=finalText.trim();if(text&&!failure)void sendMessage(text,true,id);else scheduleListen()};try{r.start()}catch(_){stopCall('تعذر بدء الميكروفون. أعد فتح الصفحة في Chrome.')}}
 async function sendMessage(message,voice=false,id=session){if(busy)return;stopRecognition();busy=true;update();status.textContent='PRO يعالج الرسالة…';if(voice)setCall('PRO يفكر…');addMessage(message,'user');const loading=addMessage('جاري التفكير…','ai');const controller=new AbortController();const timer=setTimeout(()=>controller.abort(),70000);let reply='',ok=false;
-try{const response=await fetch('/chat',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({message,voice,images:voice?[]:pendingImages,video:!voice&&pendingVideo}),signal:controller.signal});const data=await response.json();reply=response.ok?(data.reply||'تمام.'):(data.error||'صار خطأ في الخادم.');loading.textContent=reply;ok=response.ok;if(ok)lastReply=reply}catch(err){loading.textContent=err.name==='AbortError'?'الطلب أخذ وقت طويل. ما نعرفوش هل اكتمل على الخادم.':'تعذر الاتصال بـ PRO. جرّب بعد شوية.'}finally{clearTimeout(timer);busy=false;status.textContent='';update();chat.scrollTop=chat.scrollHeight}
+try{const response=await fetch('/chat',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({message,voice,images:voice?[]:pendingImages,video:!voice&&pendingVideo}),signal:controller.signal});const data=await response.json();reply=response.ok?(data.reply||'تمام.'):(data.error||'صار خطأ في الخادم.');loading.textContent=reply;ok=response.ok}catch(err){loading.textContent=err.name==='AbortError'?'الطلب أخذ وقت طويل. ما نعرفوش هل اكتمل على الخادم.':'تعذر الاتصال بـ PRO. جرّب بعد شوية.'}finally{clearTimeout(timer);busy=false;status.textContent='';update();chat.scrollTop=chat.scrollHeight}
 if(voice&&active&&id===session){if(ok)speak(reply,scheduleListen);else stopCall('المكالمة توقفت بسبب خطأ. التفاصيل في الدردشة.')}else if(!active&&!voice)input.focus()}
 
-let lastReply='', pendingImages=[], pendingVideo=false, mediaURL=null;
-const extraControlIds=['attachButton','removeMedia','docWord','docPdf','useLastReply','imageText','textPosition','docTitle','docBody'];
+let pendingImages=[], pendingVideo=false, mediaURL=null;
+const extraControlIds=['attachButton','removeMedia'];
 function extraUpdate(){for(const id of extraControlIds)$(id).disabled=active||busy||speaking}
 function clearMedia(){pendingImages=[];pendingVideo=false;if(mediaURL)URL.revokeObjectURL(mediaURL);mediaURL=null;$('mediaPreview').replaceChildren();$('mediaFile').value=''}
 $('attachButton').addEventListener('click',()=>$('mediaFile').click());
@@ -202,43 +201,15 @@ $('mediaFile').addEventListener('change',async()=>{
  }catch(err){clearMedia();addMessage(err.message,'ai')}
  finally{busy=false;status.textContent='';update()}
 });
-async function applyArabicText(imageData,text,position){
- if(!text.trim())return imageData;
- const img=new Image();const ready=waitEvent(img,'load');img.src=imageData;await ready;
- const c=document.createElement('canvas');c.width=img.naturalWidth;c.height=img.naturalHeight;const ctx=c.getContext('2d');ctx.drawImage(img,0,0);
- const padding=Math.round(c.width*.06),maxWidth=c.width-padding*2;let size=Math.round(c.width*.055),lines=[];
- ctx.direction='rtl';ctx.textAlign='center';ctx.textBaseline='middle';
- for(;size>=16;size--){ctx.font='bold '+size+'px Arial, sans-serif';lines=[];let line='';for(const word of text.trim().split(/\s+/)){const candidate=(line+' '+word).trim();if(line&&ctx.measureText(candidate).width>maxWidth){lines.push(line);line=word}else line=candidate}if(line)lines.push(line);if(lines.length<=3&&lines.every(line=>ctx.measureText(line).width<=maxWidth))break}
- const lineHeight=size*1.4,blockHeight=lines.length*lineHeight+padding;
- const y=position==='top'?padding:position==='center'?(c.height-blockHeight)/2:c.height-blockHeight-padding;
- ctx.fillStyle='rgba(0,0,0,.65)';ctx.fillRect(padding/2,y,c.width-padding,blockHeight);ctx.fillStyle='white';
- lines.forEach((line,i)=>ctx.fillText(line,c.width/2,y+padding/2+lineHeight*(i+.5),maxWidth));
- return c.toDataURL('image/jpeg',.95);
-}
-$('useLastReply').addEventListener('click',()=>{if(!lastReply){status.textContent='اطلب من pro كتابة المستند أولاً.';return}$('docBody').value=lastReply});
-async function downloadDocument(format){
- if(active||busy||speaking)return;
- const content=$('docBody').value.trim()||lastReply,title=$('docTitle').value.trim()||'مستند pro';
- if(!content){status.textContent='اطلب من pro كتابة النص ثم اضغط استخدم آخر رد، أو اكتب النص هنا.';return}
- busy=true;update();status.textContent='نجهّز الملف…';const controller=new AbortController();const timer=setTimeout(()=>controller.abort(),45000);
- try{const r=await fetch('/create-document',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({title,content,format}),signal:controller.signal});if(!r.ok){const d=await r.json();throw new Error(d.error||'تعذر إنشاء الملف.')}
-  const blob=await r.blob(),url=URL.createObjectURL(blob);const el=addMessage('الملف جاهز: '+title+'\n','ai');const a=document.createElement('a');a.href=url;a.download='pro-document.'+format;a.textContent='تنزيل '+(format==='docx'?'Word':'PDF');a.style.color='#b9d7ff';el.append(a);a.click();
- }catch(err){addMessage(err.name==='AbortError'?'إنشاء الملف أخذ وقتاً طويلاً.':err.message,'ai')}
- finally{clearTimeout(timer);busy=false;status.textContent='';update()}
-}
-$('docWord').addEventListener('click',()=>downloadDocument('docx'));
-$('docPdf').addEventListener('click',()=>downloadDocument('pdf'));
-
 try{const saved=sessionStorage.getItem('proLastImagePrompt');if(saved&&saved.length<=2048){lastImagePrompt=saved;$('continueImage').checked=true}}catch(_){}
 $('imageButton').addEventListener('click',async()=>{
  if(busy||active||speaking)return;
  const prompt=input.value.trim();if(!prompt){status.textContent='اكتب وصف الصورة أولاً.';input.focus();return}
  busy=true;update();status.textContent='PRO يصمّم الصورة…';addMessage('صمّم صورة: '+prompt,'user');
  const loading=addMessage('جاري تصميم الصورة…','ai');const controller=new AbortController();const timer=setTimeout(()=>controller.abort(),45000);
- try{const response=await fetch('/generate-image',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({prompt,suppress_text:!!$('imageText').value.trim(),previous_prompt:$('continueImage').checked?lastImagePrompt:''}),signal:controller.signal});const data=await response.json();
+ try{const response=await fetch('/generate-image',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({prompt,previous_prompt:$('continueImage').checked?lastImagePrompt:''}),signal:controller.signal});const data=await response.json();
  if(!response.ok)throw new Error(data.error||'تعذر تصميم الصورة.');
  if(typeof data.image!=='string'||!data.image.startsWith('data:image/jpeg;base64,'))throw new Error('وصلت نتيجة غير صالحة.');
- data.image=await applyArabicText(data.image,$('imageText').value,$('textPosition').value);
  loading.textContent='';const img=document.createElement('img');img.src=data.image;img.alt=prompt;img.style.cssText='display:block;width:100%;border-radius:12px;margin-bottom:12px';
  const link=document.createElement('a');link.href=data.image;link.download='PRO-image.jpg';link.textContent='تنزيل الصورة';link.style.color='#b9d7ff';loading.append(img,link);lastImagePrompt=data.prompt;try{sessionStorage.setItem('proLastImagePrompt',lastImagePrompt)}catch(_){}$('continueImage').checked=true;input.value='';
  }catch(err){loading.textContent=err.name==='AbortError'?'الطلب أخذ وقت طويل. ممكن يكون اكتمل على الخادم؛ تجنب تكراره فوراً.':err.message}
@@ -317,8 +288,6 @@ def generate_image():
             return jsonify({'error': 'انتظر 10 ثواني بين طلبات الصور.'}), 429
         last_image_request = now
         image_prompt = prepare_image_prompt(prompt.strip(), previous_prompt.strip() or None)
-        if data.get('suppress_text') is True:
-            image_prompt = image_prompt[:1980] + '. No text or lettering in the generated image.'
         response = requests.post(
             'https://api.cloudflare.com/client/v4/accounts/' + CLOUDFLARE_ACCOUNT_ID + '/ai/run/' + IMAGE_MODEL,
             headers={'Authorization': 'Bearer ' + CLOUDFLARE_API_TOKEN},
@@ -473,52 +442,6 @@ def chat():
         traceback.print_exc()
         return jsonify({'error':'صار خطأ في PRO. راجع Logs في Render.'}),500
 
-# Embedded unmodified DejaVuSans font license:
-# Copyright: Copyright (c) 2003 by Bitstream, Inc. All Rights Reserved. 
-#  Bitstream Vera is a trademark of Bitstream, Inc.
-#  DejaVu changes are in public domain.
-# License: bitstream-vera
-#  Permission is hereby granted, free of charge, to any person obtaining a copy
-#  of the fonts accompanying this license ("Fonts") and associated
-#  documentation files (the "Font Software"), to reproduce and distribute the
-#  Font Software, including without limitation the rights to use, copy, merge,
-#  publish, distribute, and/or sell copies of the Font Software, and to permit
-#  persons to whom the Font Software is furnished to do so, subject to the
-#  following conditions:
-#  .
-#  The above copyright and trademark notices and this permission notice shall
-#  be included in all copies of one or more of the Font Software typefaces.
-#  .
-#  The Font Software may be modified, altered, or added to, and in particular
-#  the designs of glyphs or characters in the Fonts may be modified and
-#  additional glyphs or characters may be added to the Fonts, only if the fonts
-#  are renamed to names not containing either the words "Bitstream" or the word
-#  "Vera".
-#  .
-#  This License becomes null and void to the extent applicable to Fonts or Font
-#  Software that has been modified and is distributed under the "Bitstream
-#  Vera" names.
-#  .
-#  The Font Software may be sold as part of a larger software package but no
-#  copy of one or more of the Font Software typefaces may be sold by itself.
-#  .
-#  THE FONT SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS
-#  OR IMPLIED, INCLUDING BUT NOT LIMITED TO ANY WARRANTIES OF MERCHANTABILITY,
-#  FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT OF COPYRIGHT, PATENT,
-#  TRADEMARK, OR OTHER RIGHT. IN NO EVENT SHALL BITSTREAM OR THE GNOME
-#  FOUNDATION BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, INCLUDING
-#  ANY GENERAL, SPECIAL, INDIRECT, INCIDENTAL, OR CONSEQUENTIAL DAMAGES,
-#  WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF
-#  THE USE OR INABILITY TO USE THE FONT SOFTWARE OR FROM OTHER DEALINGS IN THE
-#  FONT SOFTWARE.
-#  .
-#  Except as contained in this notice, the names of Gnome, the Gnome
-#  Foundation, and Bitstream Inc., shall not be used in advertising or
-#  otherwise to promote the sale, use or other dealings in this Font Software
-#  without prior written authorization from the Gnome Foundation or Bitstream
-#  Inc., respectively. For further information, contact: fonts at gnome dot
-#  org.
-
 def decode_media_images(items):
     if items is None:
         return []
@@ -538,170 +461,6 @@ def decode_media_images(items):
             im.verify()
         clean.append(item)
     return clean
-
-
-def build_word(title, content):
-    from docx import Document
-    from docx.shared import Inches, Pt, RGBColor
-    from docx.enum.text import WD_ALIGN_PARAGRAPH
-    from docx.oxml import OxmlElement
-    from docx.oxml.ns import qn
-    doc = Document()
-    doc.core_properties.author = 'محمود'
-    doc.core_properties.title = title
-    section = doc.sections[0]
-    section.page_width, section.page_height = Inches(8.5), Inches(11)
-    section.top_margin = section.bottom_margin = Inches(0.8)
-    section.left_margin = section.right_margin = Inches(0.8)
-    for style_name in ('Normal', 'Title', 'Heading 1', 'Heading 2'):
-        style = doc.styles[style_name]
-        style.font.name = 'Arial'
-        style.font.color.rgb = RGBColor(0, 0, 0)
-        style.font.size = Pt(13 if style_name == 'Normal' else 22)
-    doc.styles['Normal'].paragraph_format.space_after = Pt(8)
-    doc.styles['Normal'].paragraph_format.line_spacing = 1.25
-
-    def add(text, style=None):
-        p = doc.add_paragraph(style=style)
-        rtl = bool(re.search(r'[\u0600-\u06ff]', text))
-        p.alignment = WD_ALIGN_PARAGRAPH.LEFT
-        # In a bidi paragraph Word mirrors left justification to the right edge.
-        if rtl:
-            bidi = OxmlElement('w:bidi')
-            p._p.get_or_add_pPr().append(bidi)
-        # Keep separate runs for Latin fragments so mixed numbers and Arabic
-        # remain readable in Word's bidirectional paragraph layout.
-        for part in re.split(r'([A-Za-z0-9][A-Za-z0-9 /:.,_+\-]*)', text):
-            if not part:
-                continue
-            run = p.add_run(part)
-            run.font.name = 'Arial'
-            run._element.get_or_add_rPr().rFonts.set(qn('w:cs'), 'Arial')
-            if rtl and re.search(r'[\u0600-\u06ff]', part):
-                flag = OxmlElement('w:rtl')
-                run._element.get_or_add_rPr().append(flag)
-        return p
-
-    add(title, 'Title')
-    for line in content.splitlines():
-        if line.startswith('### ') or line.startswith('## '):
-            add(line.lstrip('#').strip(), 'Heading 2')
-        else:
-            add(line.replace('**', '').replace('`', ''))
-    out = io.BytesIO()
-    doc.save(out)
-    return out.getvalue()
-
-
-def build_pdf(title, content):
-    # Render Arabic through HarfBuzz/FriBidi (Pillow RAQM), then preserve the
-    # rendered page in PDF. This prevents disconnected Arabic letters.
-    from PIL import Image, ImageDraw, ImageFont, features
-    from reportlab.pdfgen import canvas
-    from reportlab.lib.utils import ImageReader
-    from reportlab.lib.pagesizes import letter
-    if not features.check('raqm'):
-        raise RuntimeError('نسخة Pillow تحتاج دعم RAQM لإنتاج PDF عربي صحيح.')
-    font_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'DejaVuSans.ttf')
-    if not os.path.isfile(font_path):
-        raise RuntimeError('ارفع ملف DejaVuSans.ttf بجانب app.py ثم انشر التحديث.')
-    with open(font_path, 'rb') as font_file:
-        font_bytes = font_file.read()
-    font = ImageFont.truetype(io.BytesIO(font_bytes), 27)
-    title_font = ImageFont.truetype(io.BytesIO(font_bytes), 42)
-    width, height, margin, line_height = 1275, 1650, 110, 45
-    output = io.BytesIO()
-    pdf = canvas.Canvas(output, pagesize=letter)
-    pdf.setTitle(title)
-    pdf.setAuthor('محمود')
-    page = Image.new('RGB', (width, height), 'white')
-    draw = ImageDraw.Draw(page)
-    y = margin
-    page_number = 1
-
-    def direction(text):
-        return 'rtl' if re.search(r'[\u0600-\u06ff]', text) else 'ltr'
-
-    def finish():
-        draw.text((width // 2, height - 70), str(page_number), fill='#666666', font=font, anchor='mm')
-        pdf.drawImage(ImageReader(page), 0, 0, width=letter[0], height=letter[1])
-        pdf.showPage()
-
-    def lines(text, chosen_font):
-        if not text:
-            return ['']
-        result, line = [], ''
-        for word in text.split():
-            candidate = (line + ' ' + word).strip()
-            if draw.textlength(candidate, font=chosen_font, direction=direction(candidate)) <= width - 2 * margin:
-                line = candidate
-                continue
-            if line:
-                result.append(line)
-                line = ''
-            # Split very long tokens instead of allowing them to run off-page.
-            for character in word:
-                candidate = line + character
-                if line and draw.textlength(candidate, font=chosen_font, direction=direction(candidate)) > width - 2 * margin:
-                    result.append(line)
-                    line = character
-                else:
-                    line = candidate
-        if line:
-            result.append(line)
-        return result
-
-    for text, chosen_font in [(title, title_font)] + [(line.replace('**', '').replace('`', '').lstrip('#').strip(), font) for line in content.splitlines()]:
-        step = 65 if chosen_font == title_font else line_height
-        for line in lines(text, chosen_font):
-            if y + step > height - margin:
-                finish()
-                page_number += 1
-                if page_number > 30:
-                    raise ValueError('المستند طويل جداً؛ قلّل النص.')
-                page = Image.new('RGB', (width, height), 'white')
-                draw = ImageDraw.Draw(page)
-                y = margin
-            rtl = direction(line) == 'rtl'
-            draw.text((width - margin if rtl else margin, y), line,
-                      font=chosen_font, fill='black', direction=direction(line),
-                      anchor='ra' if rtl else 'la')
-            y += step
-        y += 12
-    finish()
-    pdf.save()
-    return output.getvalue()
-
-
-@app.route('/create-document', methods=['POST'])
-def create_document():
-    data = request.get_json(silent=True)
-    if not isinstance(data, dict):
-        return jsonify({'error': 'طلب ملف غير صالح.'}), 400
-    title, content, kind = data.get('title', 'مستند pro'), data.get('content'), data.get('format')
-    if not isinstance(title, str) or not title.strip() or len(title) > 120:
-        return jsonify({'error': 'عنوان المستند لازم يكون بين 1 و120 حرف.'}), 400
-    if not isinstance(content, str) or not content.strip() or len(content) > 30000:
-        return jsonify({'error': 'نص المستند لازم يكون بين 1 و30000 حرف.'}), 400
-    if kind not in ('docx', 'pdf'):
-        return jsonify({'error': 'اختار Word أو PDF.'}), 400
-    if not document_lock.acquire(blocking=False):
-        return jsonify({'error': 'في ملف قيد التجهيز؛ جرّب بعد شوية.'}), 429
-    try:
-        raw = build_word(title.strip(), content.strip()) if kind == 'docx' else build_pdf(title.strip(), content.strip())
-        mime = 'application/vnd.openxmlformats-officedocument.wordprocessingml.document' if kind == 'docx' else 'application/pdf'
-        return Response(raw, mimetype=mime, headers={
-            'Content-Disposition': 'attachment; filename="pro-document.' + kind + '"',
-            'Cache-Control': 'no-store'})
-    except ImportError:
-        return jsonify({'error': 'حدّث requirements.txt وانشر التحديث لتفعيل إنشاء الملفات.'}), 503
-    except (ValueError, RuntimeError) as exc:
-        return jsonify({'error': str(exc)}), 400
-    except Exception:
-        traceback.print_exc()
-        return jsonify({'error': 'تعذر إنشاء الملف. راجع Logs في Render.'}), 500
-    finally:
-        document_lock.release()
 
 
 @app.errorhandler(413)
