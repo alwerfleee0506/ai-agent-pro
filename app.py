@@ -85,7 +85,7 @@ def photo_name_key(name):
 
 
 def photo_command(message):
-    text = message.strip().rstrip(' .،!؟')
+    text = re.sub(r'^(?:برو|PRO)[،,:\s]+', '', message.strip(), flags=re.I).rstrip(' .،!؟')
     save_patterns = [
         r'^(?:هذا|هدا|هذي|هذه|هادي|هاذي)(?:\s+(?:الشخص|شخص|الراجل|الرجل|البنت))?\s+(?:اسمها|اسمه|اسم الشخص)\s*[:：]?\s+(.+)$',
         r'^(?:هذا|هدا|هذي|هذه|هادي|هاذي)\s+(?:صورة|صوره)\s+(?:صديقي\s+|صاحبي\s+|الصديق\s+)?(.+)$',
@@ -97,10 +97,37 @@ def photo_command(message):
             name = match[1].strip(' :،.؟!«»"')
             if 0 < len(name) <= 120 and len(name.split()) <= 8:
                 return 'save', name
-    match = re.fullmatch(r'(?:نبي|بني|ابي|أبي|اريد|أريد|وريني|ورّيني|ورينيلي|اعرض|أعرض|هات|عطيني|اعطني|أعطني)(?:\s+(?:لي|ليا))?\s+(?:صورة|صوره|الصورة|الصوره)(?:\s+(?:متاع|متع))?\s+(.+)', text)
+    match = re.fullmatch(r'(?:نبي|بني|بدي|ابي|أبي|اريد|أريد|وريني|ورّيني|ورينيلي|اعرض|أعرض|هات|عطيني|اعطيني|أعطيني|اعطني|أعطني)(?:\s+(?:لي|ليا))?\s+(?:صورة|صوره|الصورة|الصوره)(?:\s+(?:متاع|متع))?\s+(.+)', text)
     if match:
         return 'show', match[1].strip(' :،.؟!«»"')
     return None, None
+
+
+def photo_lookup_key(name):
+    key = photo_name_key(name)
+    key = re.sub(r'\([^)]*\)', '', key).strip()
+    key = re.sub(r'^(?:(?:صورة|صوره|الصورة|الصوره|الصديق|الصديقة|صديقي|صديقتي|صاحبي|صاحبتي)\s+)+', '', key)
+    key = re.split(r'\s+(?:صديقي|صديقتي|صديقك|صديقتك|صاحبي|صاحبتي|من)\s+', key, maxsplit=1)[0]
+    key = re.sub(r'\s+(?:صديقي|صديقتي|صديقك|صديقتك|صاحبي|صاحبتي)$', '', key)
+    return key.strip()
+
+
+def choose_saved_photo_name(requested, names):
+    target = photo_lookup_key(requested)
+    if not target:
+        return None, []
+    matches = [n for n in names if photo_lookup_key(n) == target]
+    if len(matches) == 1:
+        return matches[0], []
+    if len(matches) > 1:
+        return None, matches
+    # Match whole name tokens only; never use arbitrary substrings or a face.
+    matches = [n for n in names if photo_lookup_key(n) and
+               (' ' + photo_lookup_key(n) + ' ') in (' ' + target + ' ')]
+    if matches:
+        longest = max(len(photo_lookup_key(n)) for n in matches)
+        matches = [n for n in matches if len(photo_lookup_key(n)) == longest]
+    return (matches[0], []) if len(matches) == 1 else (None, matches)
 
 
 def handle_photo_message(message, images, video, operation=None):
@@ -134,11 +161,19 @@ def handle_photo_message(message, images, video, operation=None):
                 cur.execute('SELECT display_name,mime_type,image_bytes FROM pro_photos WHERE user_id=%s AND name_key=%s',
                             (PRO_OWNER_ID, photo_name_key(name)))
                 photo = cur.fetchone()
+                if not photo:
+                    cur.execute('SELECT display_name FROM pro_photos WHERE user_id=%s', (PRO_OWNER_ID,))
+                    resolved, ambiguous = choose_saved_photo_name(name, [row['display_name'] for row in cur.fetchall()])
+                    if ambiguous:
+                        return {'reply': 'لقيت أكثر من صورة قريبة للاسم. تقصد أي واحد: ' + '، '.join(ambiguous) + '؟'}
+                    if resolved:
+                        cur.execute('SELECT display_name,mime_type,image_bytes FROM pro_photos WHERE user_id=%s AND display_name=%s', (PRO_OWNER_ID, resolved))
+                        photo = cur.fetchone()
                 if photo:
                     return {'reply': 'تفضل، هذي صورة ' + photo['display_name'] + '.',
                             'saved_photo': True, 'photo_name': photo['display_name'],
                             'image': 'data:' + photo['mime_type'] + ';base64,' + base64.b64encode(bytes(photo['image_bytes'])).decode('ascii')}
-                if operation or re.match(r'^(?:وريني|ورّيني|ورينيلي|اعرض|أعرض|هات|عطيني|اعطني|أعطني)', message):
+                if operation or re.match(r'^(?:وريني|ورّيني|ورينيلي|اعرض|أعرض|هات|عطيني|اعطيني|أعطيني|اعطني|أعطني)', message):
                     return {'reply': 'ما عنديش صورة محفوظة باسم ' + name + '. ارفعها وقولي اسم الشخص باش نحفظها.'}
     return None
 
@@ -545,7 +580,20 @@ def speech():
         return jsonify({'error': 'تعذر الاتصال بخدمة الصوت في Groq.'}), 502
 
 @app.route('/health')
-def health(): return jsonify({'photo_memory_version':2,'status':'ok','service':'PRO AI Agent','provider':'groq','model':GROQ_MODEL,'voice':'groq-orpheus-arabic'})
+def health(): return jsonify({'photo_memory_version':3,'status':'ok','service':'PRO AI Agent','provider':'groq','model':GROQ_MODEL,'voice':'groq-orpheus-arabic'})
+
+@app.route('/photo-status', methods=['GET'])
+def photo_status():
+    try:
+        with get_db() as conn:
+            with conn.cursor(cursor_factory=RealDictCursor) as cur:
+                cur.execute('SELECT display_name,updated_at FROM pro_photos WHERE user_id=%s ORDER BY updated_at DESC', (PRO_OWNER_ID,))
+                photos = [{'name': r['display_name'], 'saved_at': r['updated_at'].isoformat()} for r in cur.fetchall()]
+        return jsonify({'status': 'ok', 'photo_memory_version': 3, 'saved_count': len(photos), 'photos': photos}), 200, {'Cache-Control': 'no-store'}
+    except Exception:
+        traceback.print_exc()
+        return jsonify({'status': 'error', 'error': 'تعذر قراءة الصور المحفوظة من قاعدة البيانات.'}), 500
+
 
 @app.route('/memory-test')
 def memory_test():
