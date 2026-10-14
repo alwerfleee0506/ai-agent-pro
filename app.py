@@ -132,6 +132,10 @@ def extract_document(item):
         wb = load_workbook(stream, read_only=True, data_only=False, keep_links=False)
         try:
             for sheet in wb:
+                # Some valid XLSX writers omit the optional dimension element.
+                # Read-only openpyxl then reports None until dimensions are scanned.
+                if sheet.max_row is None or sheet.max_column is None:
+                    sheet.calculate_dimension(force=True)
                 if sheet.max_row > 300 or sheet.max_column > 30:
                     truncated = True
                 append('[ورقة: ' + sheet.title + ']')
@@ -931,6 +935,7 @@ def chat():
         except ImportError:
             return jsonify({'error':'يلزم إضافة python-docx وopenpyxl وpypdf إلى requirements.txt ثم إعادة النشر.'}), 503
         except Exception:
+            traceback.print_exc()
             return jsonify({'error':'تعذر قراءة الملف. تأكد من صيغته وحجمه وأنه غير محمي بكلمة مرور.'}), 400
         video=data.get('video') is True and bool(images)
         try:
