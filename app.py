@@ -61,7 +61,9 @@ PDF المصوّر يحتاج صور الصفحات. لا تعدّل PDF مبا�
 للفواتير يمكن استعمال invoice_items=[{"name":"كرسي","quantity":40,"price":13}] بدلاً من headers وrows؛ الخادم يحسب الإجماليات فعلياً. لا تخترع أرقاماً غير مقروءة؛ اطلب توضيحها.
 لتعديل Word المرفق فقط: {"action":"edit","format":"docx","name":"نسخة معدلة","replacements":[{"old":"النص الأصلي","new":"النص الجديد"}]}.
 لتعديل Excel المرفق فقط: {"action":"edit","format":"xlsx","name":"نسخة معدلة","cells":[{"sheet":"اسم الورقة","cell":"B2","value":40}]}.
-لإعادة تنسيق الملف أو تحويل النص إلى Word استعمل create ووضّح إعادة الإنشاء. لا تقل إن ملفاً جاهز إلا بعد نجاح الأداة.
+لتغيير اتجاه Excel المرفق استعمل edit مع sheet_layouts=[{"sheet":"اسم الورقة","right_to_left":true}]؛ يمكن إرسال cells=[] أو حذفها عند تعديل الاتجاه فقط، ويمكن دمج الاتجاه مع تعديل الخلايا.
+إذا طلب المستخدم أن يبدأ الصنف من اليمين وبعده الكمية وسعر الوحدة والإجمالي، غيّر اتجاه عرض الورقة إلى right_to_left=true. لا تعكس قيم الأعمدة ولا تعِد إنشاء الملف؛ العمود A يظهر يميناً والعمود B بعده إلى اليسار. لتغيير الاتجاه لليسار استعمل false. استخدم أسماء الأوراق الفعلية من الملف المرفق، وأرسل عملية لكل ورقة فقط إذا طلب المستخدم كل الأوراق.
+إعادة تصميم تنسيقات أخرى أو تحويل النص إلى Word يستعمل create مع توضيح إعادة الإنشاء. لا تقل إن ملفاً جاهز إلا بعد نجاح الأداة.
 لا تستعمل image_prompt لتصميم ملف أو فاتورة. أقصى إنشاء: 300 صف و30 عموداً؛ أو 200 فقرة. اطلب تقسيم العمل إذا تجاوز ذلك.
 '''
 SYSTEM_PROMPT += FILE_TOOL_PROMPT
@@ -261,9 +263,14 @@ def render_file_action(spec, source):
         from openpyxl.styles import Font, PatternFill, Alignment
         wb = load_workbook(io.BytesIO(source['raw']), keep_links=False) if action == 'edit' else Workbook()
         if action == 'edit':
-            changes = spec.get('cells')
-            if not isinstance(changes, list) or not changes or len(changes) > 300:
-                raise ValueError('حدّد الخلايا المطلوب تعديلها.')
+            changes = spec.get('cells', [])
+            layouts = spec.get('sheet_layouts', [])
+            if not isinstance(changes, list) or len(changes) > 300 or not isinstance(layouts, list) or len(layouts) > 100 or not (changes or layouts):
+                raise ValueError('حدّد الخلايا أو اتجاه الورقة المطلوب تعديله.')
+            for layout in layouts:
+                if not isinstance(layout, dict) or layout.get('sheet') not in wb.sheetnames or not isinstance(layout.get('right_to_left'), bool):
+                    raise ValueError('اسم الورقة أو اتجاهها غير صالح.')
+                wb[layout['sheet']].sheet_view.rightToLeft = layout['right_to_left']
             for change in changes:
                 if not isinstance(change, dict) or change.get('sheet') not in wb.sheetnames or not re.fullmatch(r'[A-Z]{1,3}[1-9][0-9]{0,5}', str(change.get('cell', ''))):
                     raise ValueError('اسم الورقة أو عنوان الخلية غير صالح.')
