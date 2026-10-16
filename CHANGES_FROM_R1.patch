@@ -1,0 +1,77 @@
+--- review/app.py
++++ PRO4-R2-REVIEW/app.py
+@@ -11,7 +11,7 @@
+ import requests
+ 
+ app = Flask(__name__)
+-PRO_UI_VERSION = '2026.10.16-PRO4-R1-REVIEW'
++PRO_UI_VERSION = '2026.10.16-PRO4-R2-REVIEW'
+ 
+ # Single-owner authentication. Secrets are read only from Render environment.
+ import hashlib
+@@ -316,6 +316,8 @@
+ 
+ def verified_search_reply(reply, result):
+     sources = result.get('results', [])
++    if result.get('status')=='unavailable':
++        return 'البحث غير مفعّل حالياً على الخادم. يلزم إعداد SERPER_API_KEY أو TAVILY_API_KEY قبل التحقق من المعلومات الحالية.'
+     if not sources:
+         return 'ما قدرتش نتحقق من المعلومة الحالية: '+(' '.join(result.get('warnings',[])) or 'ما ظهرتش نتائج كافية؛ هذا لا يثبت عدم وجود المطلوب.')
+     allowed = {item['url'] for item in sources}
+@@ -1351,7 +1353,11 @@
+ try{for(const chunk of speechChunks(text)){if(token!==speechToken)return;const controller=new AbortController();audioController=controller;const timer=setTimeout(()=>controller.abort(),55000);let response;try{response=await proFetch('/speech',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({text:chunk,voice}),signal:controller.signal})}finally{clearTimeout(timer);if(audioController===controller)audioController=null}if(token!==speechToken)return;if(!response.ok){let message='تعذر توليد الصوت.';try{message=(await response.json()).error||message}catch(_){}throw new Error(message)}const blob=await response.blob();if(token!==speechToken)return;audioURL=URL.createObjectURL(blob);const a=new Audio(audioURL);liveAudio=a;setCall('PRO يتكلم…');await new Promise((resolve,reject)=>{let settled=false;const cleanup=()=>{a.onended=a.onerror=null;stopPlayback=null};const finish=()=>{if(settled)return;settled=true;cleanup();resolve()};const fail=()=>{if(settled)return;settled=true;cleanup();reject(new Error('المتصفح منع تشغيل الصوت أو فشل التشغيل. اضغط جرّب الصوت مرة ثانية.'))};stopPlayback=finish;a.onended=finish;a.onerror=fail;a.play().catch(fail)});if(token!==speechToken)return;URL.revokeObjectURL(audioURL);audioURL=null;liveAudio=null}if(token!==speechToken)return;speaking=false;update();done()}
+ catch(err){if(token!==speechToken)return;const message=err.name==='AbortError'?'توليد الصوت أخذ وقت طويل. جرّب مرة ثانية.':err.message;cancelSpeech();if(active)stopCall(message);else setCall(message)}}
+ function listen(){if(!active||busy||speaking||recognition||document.hidden)return;const id=session;const r=new Recognition();recognition=r;r.lang='ar-LY';r.continuous=false;r.interimResults=true;r.maxAlternatives=1;let finalText='',draft='',failure='';r.onstart=()=>{if(active&&id===session)setCall('نسمع فيك…')};r.onresult=e=>{if(!active||id!==session||recognition!==r)return;draft='';for(let i=0;i<e.results.length;i++){if(e.results[i].isFinal)finalText+=e.results[i][0].transcript+' ';else draft+=e.results[i][0].transcript}setCall(''+(finalText||draft||'نسمع فيك…'))};r.onerror=e=>{if(recognition!==r||id!==session)return;failure=e.error;const notes={'not-allowed':'اسمح للصفحة باستعمال الميكروفون ثم أعد الاتصال.','service-not-allowed':'خدمة التعرف على الكلام غير متاحة في المتصفح.','audio-capture':'الميكروفون غير متاح.','network':'تعذر الاتصال بخدمة التعرف على الكلام. جرّب مرة ثانية.','language-not-supported':'المتصفح لا يدعم لغة التعرف المختارة.'};if(notes[e.error])stopCall(notes[e.error]);else if(!['no-speech','aborted'].includes(e.error))stopCall('خطأ في التعرف على الكلام: '+e.error)};r.onend=()=>{if(recognition!==r)return;recognition=null;if(!active||id!==session)return;const text=finalText.trim();if(text&&!failure)void sendMessage(text,true,id);else scheduleListen()};try{r.start()}catch(_){stopCall('تعذر بدء الميكروفون. أعد فتح الصفحة في Chrome.')}}
+-async function sendMessage(message,voice=false,id=session){if(busy)return;stopRecognition();busy=true;update();status.textContent='PRO يعالج الرسالة…';if(voice)setCall('PRO يفكر…');addMessage(message,'user');const loading=addMessage('جاري التفكير…','ai');const controller=new AbortController();const timer=setTimeout(()=>controller.abort(),270000);let reply='',ok=false;
++function chatProgressMessage(message,images,source,video){
++ const invoice=!video&&(images.length>0||(source&&/\.pdf$/i.test(source.name||'')))&&/فاتور|invoice/i.test(message)&&/اكسل|إكسل|اكسيل|excel|xlsx|حو.?ل/i.test(message);
++ return invoice?'نقرأ الفاتورة بقراءتين مستقلتين لمراجعة الأسماء والأرقام. قد تستغرق العملية دقائق؛ انتظر النتيجة قبل إعادة الطلب.':'جاري التفكير…';
++}
++async function sendMessage(message,voice=false,id=session){if(busy)return;stopRecognition();busy=true;update();status.textContent='PRO يعالج الرسالة…';if(voice)setCall('PRO يفكر…');addMessage(message,'user');const progress=voice?'جاري التفكير…':chatProgressMessage(message,pendingImages,pendingDocument,pendingVideo);const loading=addMessage(progress,'ai');if(progress!=='جاري التفكير…')status.textContent=progress;const controller=new AbortController();const timer=setTimeout(()=>controller.abort(),270000);let reply='',ok=false;
+ try{await ensureConversation(message);const response=await proFetch('/chat',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({message,voice,conversation_id:currentConversationId,images:voice?[]:(pendingImages.length?pendingImages:($('continueImage').checked&&lastImageAnalysis?[lastImageAnalysis]:[])),photo_upload:!voice&&!pendingVideo&&pendingImages.length===1?'design_reference':null,design_images:pendingDesignImages.length?pendingDesignImages:(pendingImages.length?pendingImages:($('continueImage').checked&&lastImageData?[lastImageData]:[])),video:!voice&&pendingVideo,document:voice?null:pendingDocument,search:!voice&&$('searchMode').checked,search_scope:$('searchScope').value}),signal:controller.signal});const data=await response.json();reply=response.ok?(data.reply||'تمام.'):(data.error||'صار خطأ في الخادم.');loading.textContent=reply;if(response.ok&&data.image){if(data.saved_photo)showSavedPhoto(loading,data);else await showGeneratedImage(loading,data,message);}if(response.ok&&data.file)showFile(loading,data.file);if(response.ok&&data.invoice_review)showInvoiceReview(loading,data.invoice_review);if(response.ok&&data.task_proposal)showTaskProposal(loading,data.task_proposal);if(response.ok&&data.sources)showSearchSources(loading,data);ok=response.ok}catch(err){loading.textContent=err.name==='AbortError'?'الطلب أخذ وقت طويل. ما نعرفوش هل اكتمل على الخادم.':'تعذر الاتصال بـ PRO. جرّب بعد شوية.'}finally{clearTimeout(timer);busy=false;status.textContent='';update();chat.scrollTop=chat.scrollHeight}
+ if(voice&&active&&id===session){if(ok)speak(reply,scheduleListen);else stopCall('المكالمة توقفت بسبب خطأ. التفاصيل في الدردشة.')}else if(!active&&!voice)input.focus()}
+ 
+@@ -1377,7 +1383,6 @@
+  if(data.search_warnings&&data.search_warnings.length){const note=document.createElement('small');note.textContent=data.search_warnings.join(' ');el.append(note)}
+ }
+ function showFile(el,file){
+- if(PRO_PAGE==='chat'&&file&&typeof file.data==='string'&&/\.(docx|xlsx)$/i.test(file.name||'')){clearMedia();pendingDocument={name:file.name,data:file.data};$('continueImage').checked=false;$('mediaPreview').textContent=file.name+' — الملف الحالي للمتابعة والتعديل';}
+  const raw=atob(file.data), bytes=Uint8Array.from(raw,c=>c.charCodeAt(0));
+  const url=URL.createObjectURL(new Blob([bytes],{type:file.mime}));
+  const link=document.createElement('a');link.href=url;link.download=file.name;link.textContent='تنزيل '+file.name;link.style.cssText='display:block;color:#b9d7ff;margin-top:12px';el.append(link);
+@@ -1811,11 +1816,15 @@
+         search_result = None
+         search_spec = search_intent(message, data.get('search') is True, data.get('search_scope'), rows, attached=bool(source_document or images))
+         if search_spec:
+-            search_spec = plan_search_request(search_spec, rows)
++            if SERPER_API_KEY or TAVILY_API_KEY:
++                search_spec = plan_search_request(search_spec, rows)
+             search_result = run_web_search(search_spec)
+         memory_context = format_memories(memories)+photo_context()
+         invoice_request=bool(re.search(r'فاتور|invoice',message,re.I) and re.search(r'اكسل|إكسل|اكسيل|excel|xlsx|حو.?ل',message,re.I))
+-        if invoice_request and (images or (source_document and source_document['ext']=='pdf')) and not video:
++        invoice=None
++        if search_result is not None and not search_result.get('results'):
++            result={'reply':verified_search_reply('',search_result),'memories':[],'forget':[],'file_action':None,'image_prompt':None,'photo_action':None,'web_search':None}
++        elif invoice_request and (images or (source_document and source_document['ext']=='pdf')) and not video:
+             invoice_input=images or invoice_images({'data':base64.b64encode(source_document['raw']).decode()})
+             invoice=read_invoice(invoice_input)
+             # Always hand photo/PDF transcription to the same review UI, without a second model rewriting numbers.
+@@ -1826,9 +1835,14 @@
+             raw=call_groq(memory_context,rows,voice=data.get('voice') is True,images=images,video=video,document_context=document_context,search_context=search_result)
+             result=parse_ai_response(raw)
+         if search_result is None and result.get('web_search'):
+-            search_result = run_web_search(plan_search_request(result['web_search'], rows))
+-            raw=call_groq(memory_context,rows,voice=data.get('voice') is True,images=images,video=video,document_context=document_context,search_context=search_result)
+-            result=parse_ai_response(raw)
++            spec=result['web_search']
++            if SERPER_API_KEY or TAVILY_API_KEY:spec=plan_search_request(spec,rows)
++            search_result = run_web_search(spec)
++            if search_result.get('results'):
++                raw=call_groq(memory_context,rows,voice=data.get('voice') is True,images=images,video=video,document_context=document_context,search_context=search_result)
++                result=parse_ai_response(raw)
++            else:
++                result={'reply':verified_search_reply('',search_result),'memories':[],'forget':[],'file_action':None,'image_prompt':None,'photo_action':None,'web_search':None}
+         external_current = bool(source_document or images or video or search_result is not None)
+         external_history = any(EXTERNAL_CONTEXT_MARKER in str(row.get('message','')) or '[مرفق ملف:' in str(row.get('message','')) or '[مرفق: صورة]' in str(row.get('message','')) for row in rows)
+         blocked_persistent = False

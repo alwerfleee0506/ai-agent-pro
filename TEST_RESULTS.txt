@@ -1,0 +1,84 @@
+test_chat_uses_shared_renderer (test_app_invoice.IntegrationTests.test_chat_uses_shared_renderer) ... ok
+test_export_review_gate_and_workbook (test_app_invoice.IntegrationTests.test_export_review_gate_and_workbook) ... ok
+test_generic_invoice_uses_styled_export (test_app_invoice.IntegrationTests.test_generic_invoice_uses_styled_export) ... ok
+test_independent_failure_remains_first_read (test_app_invoice.IntegrationTests.test_independent_failure_remains_first_read) ... ok
+test_preserves_image_dimensions (test_app_invoice.IntegrationTests.test_preserves_image_dimensions) ... ok
+test_two_pass_route (test_app_invoice.IntegrationTests.test_two_pass_route) ... ok
+test_unrelated_generic_sheet_not_routed (test_app_invoice.IntegrationTests.test_unrelated_generic_sheet_not_routed) ... ok
+test_ambiguous_ocr_becomes_flag (test_invoice.InvoiceTests.test_ambiguous_ocr_becomes_flag) ... ok
+test_clean_export_keeps_adjustments_and_removes_review_text (test_invoice.InvoiceTests.test_clean_export_keeps_adjustments_and_removes_review_text) ... ok
+test_duplicate_items_preserved (test_invoice.InvoiceTests.test_duplicate_items_preserved) ... ok
+test_formula_and_cache (test_invoice.InvoiceTests.test_formula_and_cache) ... ok
+test_formula_injection_and_long_names (test_invoice.InvoiceTests.test_formula_injection_and_long_names) ... ok
+test_grand_difference_requires_explanation (test_invoice.InvoiceTests.test_grand_difference_requires_explanation) ... ok
+test_independent_name_and_digit_conflicts (test_invoice.InvoiceTests.test_independent_name_and_digit_conflicts) ... ok
+test_known_invoice_numbers (test_invoice.InvoiceTests.test_known_invoice_numbers) ... ok
+test_metadata_ambiguity_survives_review (test_invoice.InvoiceTests.test_metadata_ambiguity_survives_review) ... ok
+test_mismatch_requires_ack_and_reason (test_invoice.InvoiceTests.test_mismatch_requires_ack_and_reason) ... ok
+test_missing_name_blocked (test_invoice.InvoiceTests.test_missing_name_blocked) ... ok
+test_missing_rows_highlighted (test_invoice.InvoiceTests.test_missing_rows_highlighted) ... ok
+test_no_auto_fix_mismatch (test_invoice.InvoiceTests.test_no_auto_fix_mismatch) ... ok
+test_number_formats (test_invoice.InvoiceTests.test_number_formats) ... ok
+test_original_is_embedded (test_invoice.InvoiceTests.test_original_is_embedded) ... ok
+test_rounding_matches_financial_rule (test_invoice.InvoiceTests.test_rounding_matches_financial_rule) ... ok
+test_second_read_does_not_confirm_unreadable (test_invoice.InvoiceTests.test_second_read_does_not_confirm_unreadable) ... ok
+test_unrelated_security_and_history_unchanged (test_invoice.InvoiceTests.test_unrelated_security_and_history_unchanged) ... ok
+test_zero_is_not_missing (test_invoice.InvoiceTests.test_zero_is_not_missing) ... ok
+test_current_product_without_search_keyword (test_reasoning.ResearchTests.test_current_product_without_search_keyword) ... ok
+test_empty_and_invalid_provider_result (test_reasoning.ResearchTests.test_empty_and_invalid_provider_result) ... ok
+test_extract_does_not_accept_unrequested_url (test_reasoning.ResearchTests.test_extract_does_not_accept_unrequested_url) ... ok
+test_file_edits_do_not_trigger_lookup (test_reasoning.ResearchTests.test_file_edits_do_not_trigger_lookup) ... ok
+test_invalid_json_and_unverified_links (test_reasoning.ResearchTests.test_invalid_json_and_unverified_links) ... ok
+test_missing_credentials_cannot_claim_search (test_reasoning.ResearchTests.test_missing_credentials_cannot_claim_search) ... ok
+test_provider_failure_falls_back (test_reasoning.ResearchTests.test_provider_failure_falls_back) ... ok
+test_queries_dedupe_rank_and_no_unrequested_images (test_reasoning.ResearchTests.test_queries_dedupe_rank_and_no_unrequested_images) ... ok
+test_recommendation_and_price (test_reasoning.ResearchTests.test_recommendation_and_price) ... ok
+test_short_followup_uses_recent_subject (test_reasoning.ResearchTests.test_short_followup_uses_recent_subject) ... ok
+test_social_preserves_name_and_city (test_reasoning.ResearchTests.test_social_preserves_name_and_city) ... ok
+test_social_scope_only_on_intent (test_reasoning.ResearchTests.test_social_scope_only_on_intent) ... ok
+test_suspicious_result_urls_rejected (test_reasoning.ResearchTests.test_suspicious_result_urls_rejected) ... ok
+test_csp_nonce_matches_rendered_script_and_changes_per_request (test_review_fixes.ImageRoutes.test_csp_nonce_matches_rendered_script_and_changes_per_request) ... ok
+test_four_references_rejected_before_api_call (test_review_fixes.ImageRoutes.test_four_references_rejected_before_api_call) ... ok
+test_multi_photo_save_cannot_reuse_old_saved_upload (test_review_fixes.ImageRoutes.test_multi_photo_save_cannot_reuse_old_saved_upload) ... ok
+test_multiple_references_through_chat_and_actual_validator (test_review_fixes.ImageRoutes.test_multiple_references_through_chat_and_actual_validator) ... ok
+test_three_references_through_public_generation_route (test_review_fixes.ImageRoutes.test_three_references_through_public_generation_route) ... ok
+test_video_design_rejected_before_image_decode (test_review_fixes.ImageRoutes.test_video_design_rejected_before_image_decode) ... ok
+test_single_photo_stores_original_not_analysis_preview (test_review_fixes.OriginalPhotoTests.test_single_photo_stores_original_not_analysis_preview) ... ok
+test_connection_closes_and_has_bounded_query_timeout (test_review_fixes.ReadinessTests.test_connection_closes_and_has_bounded_query_timeout) ... ok
+test_exhausted_retries_are_not_reported_ready_and_have_cooldown (test_review_fixes.ReadinessTests.test_exhausted_retries_are_not_reported_ready_and_have_cooldown) ... [2026-10-17 01:02:58,092] ERROR in app: Database initialization attempt 1 failed: RuntimeError
+[2026-10-17 01:02:58,093] ERROR in app: Database initialization attempt 2 failed: RuntimeError
+[2026-10-17 01:02:58,093] ERROR in app: Database initialization attempt 3 failed: RuntimeError
+ok
+test_health_queries_database_and_reports_outage (test_review_fixes.ReadinessTests.test_health_queries_database_and_reports_outage) ... [2026-10-17 01:02:58,128] WARNING in app: Database readiness check failed: RuntimeError
+ok
+test_health_recovers_failed_initialization_after_cooldown (test_review_fixes.ReadinessTests.test_health_recovers_failed_initialization_after_cooldown) ... ok
+test_liveness_stays_available_during_database_outage (test_review_fixes.ReadinessTests.test_liveness_stays_available_during_database_outage) ... ok
+test_missing_config_reports_503_not_ok (test_review_fixes.ReadinessTests.test_missing_config_reports_503_not_ok) ... [2026-10-17 01:02:58,230] ERROR in app: Database initialization unavailable: configuration missing
+ok
+test_parallel_initialization_does_not_enter_twice (test_review_fixes.ReadinessTests.test_parallel_initialization_does_not_enter_twice) ... ok
+test_startup_retries_then_succeeds (test_review_fixes.ReadinessTests.test_startup_retries_then_succeeds) ... [2026-10-17 01:02:58,303] ERROR in app: Database initialization attempt 1 failed: RuntimeError
+[2026-10-17 01:02:58,304] ERROR in app: Database initialization attempt 2 failed: RuntimeError
+ok
+test_attachment_metadata_removed_without_cutting_user_bracket_lines (test_review_fixes.SearchContextTests.test_attachment_metadata_removed_without_cutting_user_bracket_lines) ... ok
+test_short_followup_does_not_leak_metadata_into_query (test_review_fixes.SearchContextTests.test_short_followup_does_not_leak_metadata_into_query) ... ok
+test_repeated_replacements_across_runs_keep_correct_offsets (test_review_fixes.WordPreservationTests.test_repeated_replacements_across_runs_keep_correct_offsets) ... ok
+test_auth_and_csrf_still_required (test_routes.RouteTests.test_auth_and_csrf_still_required) ... ok
+test_automatic_search_reaches_response_with_source_ids (test_routes.RouteTests.test_automatic_search_reaches_response_with_source_ids) ... ok
+test_image_edit_sends_all_references (test_routes.RouteTests.test_image_edit_sends_all_references) ... ok
+test_invoice_chat_never_lets_model_rewrite_numbers (test_routes.RouteTests.test_invoice_chat_never_lets_model_rewrite_numbers) ... ok
+test_ui_renders_and_new_chat_does_not_load_history (test_routes.RouteTests.test_ui_renders_and_new_chat_does_not_load_history) ... ok
+test_word_create_then_short_edit_uses_real_file (test_routes.RouteTests.test_word_create_then_short_edit_uses_real_file) ... ok
+test_xlsx_edit_keeps_formula_and_sheet_direction (test_routes.RouteTests.test_xlsx_edit_keeps_formula_and_sheet_direction) ... ok
+
+----------------------------------------------------------------------
+Ran 64 tests in 2.820s
+
+OK
+[CHAT] complete in 0.0 seconds
+[CHAT] complete in 0.0 seconds
+[CHAT] complete in 0.0 seconds
+[CHAT] complete in 0.02 seconds
+[CHAT] complete in 0.03 seconds
+[CHAT] complete in 0.01 seconds
+PASS: browser decimal arithmetic, Arabic digits, separators, zeros, exact rounding, ambiguous values, missing input, negative differences
+PASS: real upload handler preserves three originals in order, single-photo identity, multiple-file limits, mixed-file rejection, failure cleanup. DOM I/O is simulated.
